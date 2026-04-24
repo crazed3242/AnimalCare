@@ -1,0 +1,67 @@
+type User @table {
+  displayName: String!
+  email: String!
+  createdAt: Timestamp!
+  phoneNumber: String
+  profilePictureUrl: String
+  address: String
+  city: String
+  state: String
+  zipCode: String
+}
+
+type RescueOrganization @table {
+  name: String!
+  email: String!
+  createdAt: Timestamp!
+  phoneNumber: String
+  website: String
+  description: String
+  logoUrl: String
+  address: String
+  city: String
+  state: String
+  zipCode: String
+}
+
+type Pet @table {
+  name: String!
+  species: String!
+  breed: String!
+  status: String!
+  createdAt: Timestamp!
+  age: String
+  gender: String
+  size: String
+  description: String
+  imageUrls: [String]
+  lastSeenLocation: String
+  foundLocation: String
+  temperament: String
+  medicalHistory: String
+  owner: User
+  rescueOrganization: RescueOrganization
+}
+
+type Chat @table {
+  createdAt: Timestamp!
+  lastMessageContent: String
+  lastMessageTimestamp: Timestamp
+  sender: User
+  receiver: User
+  pet: Pet
+}
+
+type Message @table {
+  content: String!
+  createdAt: Timestamp!
+  chat: Chat
+  sender: User
+}
+
+type AdminUser @table {
+  username: String!
+  email: String!
+  createdAt: Timestamp!
+  lastLoginAt: Timestamp
+}
