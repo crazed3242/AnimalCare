@@ -1,9 +1,16 @@
 import { Injectable, signal } from '@angular/core';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  setDoc
+} from 'firebase/firestore';
 import { Comment } from '../models/comment.model';
 import { AuthService } from './auth.service';
-import { storageGet, storageSet } from '../utils/storage';
+import { getDb } from '../firebase/firebase';
 
-const COMMENTS_KEY = 'animal_care_comments';
+const COMMENTS_COLLECTION = 'comments';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -15,23 +22,17 @@ export class CommentService {
   readonly comments = this.commentsSignal.asReadonly();
 
   constructor(private authService: AuthService) {
-    this.loadComments();
+    this.subscribeToComments();
   }
 
-  private loadComments(): void {
-    const stored = storageGet(COMMENTS_KEY);
-    if (stored) {
-      try {
-        this.commentsSignal.set(JSON.parse(stored));
-      } catch {
-        this.commentsSignal.set([]);
-      }
-    }
-  }
+  private subscribeToComments(): void {
+    const db = getDb();
+    if (!db) return;
 
-  private saveComments(comments: Comment[]): void {
-    storageSet(COMMENTS_KEY, JSON.stringify(comments));
-    this.commentsSignal.set(comments);
+    onSnapshot(collection(db, COMMENTS_COLLECTION), snapshot => {
+      const comments = snapshot.docs.map(d => d.data() as Comment);
+      this.commentsSignal.set(comments);
+    });
   }
 
   getCommentsByPost(postId: string): Comment[] {
@@ -45,6 +46,9 @@ export class CommentService {
     if (!user) return { success: false, error: 'Not logged in' };
     if (!content.trim()) return { success: false, error: 'Comment cannot be empty' };
 
+    const db = getDb();
+    if (!db) return { success: false, error: 'Offline' };
+
     const comment: Comment = {
       id: generateId(),
       postId,
@@ -55,8 +59,10 @@ export class CommentService {
       createdAt: new Date().toISOString()
     };
 
-    const comments = [...this.commentsSignal(), comment];
-    this.saveComments(comments);
+    setDoc(doc(db, COMMENTS_COLLECTION, comment.id), comment).catch(err => {
+      console.error('[CommentService] addComment failed', err);
+    });
+
     return { success: true, comment };
   }
 
@@ -64,16 +70,20 @@ export class CommentService {
     const user = this.authService.currentUser();
     if (!user) return { success: false, error: 'Not logged in' };
 
-    const comments = this.commentsSignal();
-    const comment = comments.find(c => c.id === commentId);
+    const comment = this.commentsSignal().find(c => c.id === commentId);
     if (!comment) return { success: false, error: 'Comment not found' };
 
     if (comment.userId !== user.id && user.role !== 'admin') {
       return { success: false, error: 'Not authorized' };
     }
 
-    const updated = comments.filter(c => c.id !== commentId);
-    this.saveComments(updated);
+    const db = getDb();
+    if (!db) return { success: false, error: 'Offline' };
+
+    deleteDoc(doc(db, COMMENTS_COLLECTION, commentId)).catch(err => {
+      console.error('[CommentService] deleteComment failed', err);
+    });
+
     return { success: true };
   }
 

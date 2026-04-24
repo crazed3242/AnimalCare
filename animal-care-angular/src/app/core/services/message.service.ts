@@ -1,9 +1,19 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, computed, effect, signal } from '@angular/core';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  setDoc,
+  updateDoc,
+  where
+} from 'firebase/firestore';
+import type { Unsubscribe } from 'firebase/firestore';
 import { Message, Conversation } from '../models/message.model';
 import { AuthService } from './auth.service';
-import { storageGet, storageSet } from '../utils/storage';
+import { getDb } from '../firebase/firebase';
 
-const MESSAGES_KEY = 'animal_care_messages';
+const MESSAGES_COLLECTION = 'messages';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -13,25 +23,31 @@ function generateId(): string {
 export class MessageService {
   private messagesSignal = signal<Message[]>([]);
   readonly messages = this.messagesSignal.asReadonly();
+  private unsubscribe: Unsubscribe | null = null;
 
   constructor(private authService: AuthService) {
-    this.loadMessages();
+    effect(() => {
+      const user = this.authService.currentUser();
+      this.resubscribe(user?.id ?? null);
+    });
   }
 
-  private loadMessages(): void {
-    const stored = storageGet(MESSAGES_KEY);
-    if (stored) {
-      try {
-        this.messagesSignal.set(JSON.parse(stored));
-      } catch {
-        this.messagesSignal.set([]);
-      }
-    }
-  }
+  private resubscribe(userId: string | null): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    this.messagesSignal.set([]);
 
-  private saveMessages(messages: Message[]): void {
-    storageSet(MESSAGES_KEY, JSON.stringify(messages));
-    this.messagesSignal.set(messages);
+    const db = getDb();
+    if (!db || !userId) return;
+
+    const q = query(
+      collection(db, MESSAGES_COLLECTION),
+      where('participants', 'array-contains', userId)
+    );
+    this.unsubscribe = onSnapshot(q, snapshot => {
+      const messages = snapshot.docs.map(d => d.data() as Message);
+      this.messagesSignal.set(messages);
+    });
   }
 
   getConversations(): Conversation[] {
@@ -99,6 +115,9 @@ export class MessageService {
     const receiverProfile = this.authService.getUserProfile(receiverId);
     if (!receiverProfile) return { success: false, error: 'Receiver not found' };
 
+    const db = getDb();
+    if (!db) return { success: false, error: 'Offline' };
+
     const message: Message = {
       id: generateId(),
       senderId: user.id,
@@ -111,11 +130,14 @@ export class MessageService {
       postId,
       postTitle,
       createdAt: new Date().toISOString(),
-      read: false
+      read: false,
+      participants: [user.id, receiverId]
     };
 
-    const messages = [...this.messagesSignal(), message];
-    this.saveMessages(messages);
+    setDoc(doc(db, MESSAGES_COLLECTION, message.id), sanitize(message)).catch(err => {
+      console.error('[MessageService] sendMessage failed', err);
+    });
+
     return { success: true };
   }
 
@@ -123,14 +145,18 @@ export class MessageService {
     const user = this.authService.currentUser();
     if (!user) return;
 
-    const messages = this.messagesSignal().map(m => {
-      if (m.senderId === otherUserId && m.receiverId === user.id && !m.read) {
-        return { ...m, read: true };
-      }
-      return m;
-    });
+    const db = getDb();
+    if (!db) return;
 
-    this.saveMessages(messages);
+    const unread = this.messagesSignal().filter(
+      m => m.senderId === otherUserId && m.receiverId === user.id && !m.read
+    );
+
+    unread.forEach(m => {
+      updateDoc(doc(db, MESSAGES_COLLECTION, m.id), { read: true }).catch(err => {
+        console.error('[MessageService] markAsRead failed', err);
+      });
+    });
   }
 
   getTotalUnreadCount(): number {
@@ -138,4 +164,12 @@ export class MessageService {
     if (!user) return 0;
     return this.messagesSignal().filter(m => m.receiverId === user.id && !m.read).length;
   }
+}
+
+function sanitize<T extends Record<string, any>>(obj: T): T {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as T;
 }

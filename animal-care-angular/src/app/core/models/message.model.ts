@@ -11,6 +11,7 @@ export interface Message {
   postTitle?: string;
   createdAt: string;
   read: boolean;
+  participants: string[];
 }
 
 export interface Conversation {

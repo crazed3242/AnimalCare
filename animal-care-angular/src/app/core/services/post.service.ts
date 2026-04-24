@@ -1,9 +1,22 @@
 import { Injectable, signal } from '@angular/core';
-import { Post, PostType, CreatePostRequest, UrgencyLevel } from '../models/post.model';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  onSnapshot,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+  writeBatch
+} from 'firebase/firestore';
+import { Post, PostType, CreatePostRequest } from '../models/post.model';
 import { AuthService } from './auth.service';
-import { storageGet, storageSet } from '../utils/storage';
+import { getDb } from '../firebase/firebase';
 
-const POSTS_KEY = 'animal_care_posts';
+const POSTS_COLLECTION = 'posts';
+const COMMENTS_COLLECTION = 'comments';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -15,23 +28,17 @@ export class PostService {
   readonly posts = this.postsSignal.asReadonly();
 
   constructor(private authService: AuthService) {
-    this.loadPosts();
+    this.subscribeToPosts();
   }
 
-  private loadPosts(): void {
-    const stored = storageGet(POSTS_KEY);
-    if (stored) {
-      try {
-        this.postsSignal.set(JSON.parse(stored));
-      } catch {
-        this.postsSignal.set([]);
-      }
-    }
-  }
+  private subscribeToPosts(): void {
+    const db = getDb();
+    if (!db) return;
 
-  private savePosts(posts: Post[]): void {
-    storageSet(POSTS_KEY, JSON.stringify(posts));
-    this.postsSignal.set(posts);
+    onSnapshot(collection(db, POSTS_COLLECTION), snapshot => {
+      const posts = snapshot.docs.map(d => d.data() as Post);
+      this.postsSignal.set(posts);
+    });
   }
 
   getPostsByType(type: PostType): Post[] {
@@ -64,6 +71,9 @@ export class PostService {
       if (!request.age?.trim()) return { success: false, error: 'Age is required for adoption posts' };
     }
 
+    const db = getDb();
+    if (!db) return { success: false, error: 'Offline' };
+
     const now = new Date().toISOString();
     const post: Post = {
       id: generateId(),
@@ -86,8 +96,10 @@ export class PostService {
       updatedAt: now
     };
 
-    const posts = [...this.postsSignal(), post];
-    this.savePosts(posts);
+    setDoc(doc(db, POSTS_COLLECTION, post.id), sanitize(post)).catch(err => {
+      console.error('[PostService] createPost failed', err);
+    });
+
     return { success: true, post };
   }
 
@@ -95,16 +107,21 @@ export class PostService {
     const user = this.authService.currentUser();
     if (!user) return { success: false, error: 'Not logged in' };
 
-    const posts = [...this.postsSignal()];
-    const idx = posts.findIndex(p => p.id === postId);
-    if (idx === -1) return { success: false, error: 'Post not found' };
+    const post = this.postsSignal().find(p => p.id === postId);
+    if (!post) return { success: false, error: 'Post not found' };
 
-    if (posts[idx].userId !== user.id && user.role !== 'admin') {
+    if (post.userId !== user.id && user.role !== 'admin') {
       return { success: false, error: 'Not authorized' };
     }
 
-    posts[idx] = { ...posts[idx], ...updates, updatedAt: new Date().toISOString() };
-    this.savePosts(posts);
+    const db = getDb();
+    if (!db) return { success: false, error: 'Offline' };
+
+    const patch = { ...updates, updatedAt: new Date().toISOString() };
+    updateDoc(doc(db, POSTS_COLLECTION, postId), sanitize(patch)).catch(err => {
+      console.error('[PostService] updatePost failed', err);
+    });
+
     return { success: true };
   }
 
@@ -112,19 +129,30 @@ export class PostService {
     const user = this.authService.currentUser();
     if (!user) return { success: false, error: 'Not logged in' };
 
-    const posts = this.postsSignal();
-    const post = posts.find(p => p.id === postId);
+    const post = this.postsSignal().find(p => p.id === postId);
     if (!post) return { success: false, error: 'Post not found' };
 
     if (post.userId !== user.id && user.role !== 'admin') {
       return { success: false, error: 'Not authorized' };
     }
 
-    const updated = posts.filter(p => p.id !== postId);
-    this.savePosts(updated);
+    const db = getDb();
+    if (!db) return { success: false, error: 'Offline' };
 
-    const comments = JSON.parse(storageGet('animal_care_comments') || '[]');
-    storageSet('animal_care_comments', JSON.stringify(comments.filter((c: any) => c.postId !== postId)));
+    void (async () => {
+      try {
+        await deleteDoc(doc(db, POSTS_COLLECTION, postId));
+        const commentsQ = query(collection(db, COMMENTS_COLLECTION), where('postId', '==', postId));
+        const commentDocs = await getDocs(commentsQ);
+        if (!commentDocs.empty) {
+          const batch = writeBatch(db);
+          commentDocs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (err) {
+        console.error('[PostService] deletePost failed', err);
+      }
+    })();
 
     return { success: true };
   }
@@ -136,4 +164,12 @@ export class PostService {
   unresolvePost(postId: string): { success: boolean; error?: string } {
     return this.updatePost(postId, { resolved: false });
   }
+}
+
+function sanitize<T extends Record<string, any>>(obj: T): T {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as T;
 }

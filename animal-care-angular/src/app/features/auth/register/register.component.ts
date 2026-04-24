@@ -153,7 +153,7 @@ export class RegisterComponent {
   error = '';
   loading = false;
 
-  onSubmit(): void {
+  async onSubmit(): Promise<void> {
     this.error = '';
     this.loading = true;
 
@@ -163,13 +163,15 @@ export class RegisterComponent {
       return;
     }
 
-    const result = this.authService.register(this.name, this.email, this.password);
-    this.loading = false;
-
-    if (result.success) {
-      this.router.navigate(['/feed']);
-    } else {
-      this.error = result.error || 'Registration failed';
+    try {
+      const result = await this.authService.register(this.name, this.email, this.password);
+      if (result.success) {
+        this.router.navigate(['/feed']);
+      } else {
+        this.error = result.error || 'Registration failed';
+      }
+    } finally {
+      this.loading = false;
     }
   }
 }

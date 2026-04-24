@@ -141,22 +141,24 @@ export class LoginComponent {
   error = '';
   loading = false;
 
-  onSubmit(): void {
+  async onSubmit(): Promise<void> {
     this.error = '';
     this.loading = true;
 
-    const result = this.authService.login(this.email, this.password);
-    this.loading = false;
-
-    if (result.success) {
-      const user = this.authService.currentUser();
-      if (user?.role === 'admin') {
-        this.router.navigate(['/admin']);
+    try {
+      const result = await this.authService.login(this.email, this.password);
+      if (result.success) {
+        const user = this.authService.currentUser();
+        if (user?.role === 'admin') {
+          this.router.navigate(['/admin']);
+        } else {
+          this.router.navigate(['/feed']);
+        }
       } else {
-        this.router.navigate(['/feed']);
+        this.error = result.error || 'Login failed';
       }
-    } else {
-      this.error = result.error || 'Login failed';
+    } finally {
+      this.loading = false;
     }
   }
 }
