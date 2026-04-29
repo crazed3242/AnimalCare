@@ -19,6 +19,17 @@ import { DatePipe } from '@angular/common';
           <div class="panel-header">
             <h2>Messages</h2>
           </div>
+
+          <div class="search-bar card">
+            <input
+              class="input-field"
+              type="text"
+              placeholder="Search by name, message, or post..."
+              [value]="searchQuery()"
+              (input)="onSearchInput($event)"
+            />
+          </div>
+
           <div class="conversations-list">
             @for (conv of conversations(); track conv.id) {
               <div
@@ -125,6 +136,12 @@ import { DatePipe } from '@angular/common';
     .panel-header h2 {
       font-size: 1.25rem;
       font-weight: 800;
+    }
+
+    .search-bar {
+      padding: 0.75rem;
+      margin: 0.75rem;
+      margin-top: 0.5rem;
     }
 
     .conversations-list {
@@ -358,11 +375,29 @@ export class MessagesComponent implements OnInit {
   authService = inject(AuthService);
   private route = inject(ActivatedRoute);
 
-  conversations = computed(() => this.messageService.getConversations());
+  searchQuery = signal('');
+  conversations = computed(() => {
+    const q = this.searchQuery().trim().toLowerCase();
+    const all = this.messageService.getConversations();
+    if (!q) return all;
+
+    return all.filter(conv => {
+      const text = [conv.otherUserName, conv.lastMessage, conv.postTitle]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return text.includes(q);
+    });
+  });
   activeConversationId = signal<string | null>(null);
   activeConversation = signal<any>(null);
   chatMessages = signal<any[]>([]);
   newMessage = '';
+
+  onSearchInput(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.searchQuery.set(target?.value ?? '');
+  }
 
   ngOnInit(): void {
     const userId = this.route.snapshot.paramMap.get('userId');

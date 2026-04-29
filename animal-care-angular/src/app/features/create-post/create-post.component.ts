@@ -31,6 +31,15 @@ import { PostType, UrgencyLevel } from '../../core/models/post.model';
 
         <form class="create-form" (ngSubmit)="onSubmit()">
           <div class="form-group">
+            <label for="postType">Post Type *</label>
+            <select id="postType" class="input-field" [(ngModel)]="selectedType" name="postType" required>
+              @for (option of postTypeOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </div>
+
+          <div class="form-group">
             <label for="imageFile">Pet Photo</label>
             <div class="file-upload" (click)="fileInput.click()">
               @if (imageUrl) {
@@ -69,7 +78,7 @@ import { PostType, UrgencyLevel } from '../../core/models/post.model';
             <input id="contactInfo" type="text" class="input-field" [(ngModel)]="contactInfo" name="contactInfo" placeholder="Phone number or email" required />
           </div>
 
-          @if (postType() === 'rescue') {
+          @if (selectedType === 'rescue') {
             <div class="form-group">
               <label for="urgencyLevel">Urgency Level *</label>
               <select id="urgencyLevel" class="input-field" [(ngModel)]="urgencyLevel" name="urgencyLevel" required>
@@ -81,7 +90,7 @@ import { PostType, UrgencyLevel } from '../../core/models/post.model';
             </div>
           }
 
-          @if (postType() === 'adoption') {
+          @if (selectedType === 'adoption') {
             <div class="form-row">
               <div class="form-group">
                 <label for="breed">Breed *</label>
@@ -272,26 +281,36 @@ export class CreatePostComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
 
-  postType = computed(() => (this.route.snapshot.paramMap.get('type') || 'lost') as PostType);
+  private routeType = this.route.snapshot.paramMap.get('type') as PostType | null;
+  private isGenericCreatePage = this.routeType === null;
+  postTypeOptions: { value: PostType; label: string }[] = [
+    { value: 'lost', label: 'Lost Pet' },
+    { value: 'found', label: 'Found Pet' },
+    { value: 'rescue', label: 'Rescue Animal' },
+    { value: 'adoption', label: 'Adoption' }
+  ];
+  selectedType: PostType = this.routeType || 'lost';
 
   pageTitle = computed(() => {
+    if (this.isGenericCreatePage) return 'Create Post';
     const titles: Record<PostType, string> = {
       lost: 'Report Lost Pet',
       found: 'Report Found Pet',
       rescue: 'Report Rescue Animal',
       adoption: 'Post Pet for Adoption'
     };
-    return titles[this.postType()];
+    return titles[this.selectedType];
   });
 
   pageDescription = computed(() => {
+    if (this.isGenericCreatePage) return 'Choose a post type and share details with the community';
     const descs: Record<PostType, string> = {
       lost: 'Help find your lost pet by providing details',
       found: 'Help reunite a found pet with its owner',
       rescue: 'Report an animal that needs urgent help',
       adoption: 'List a pet for adoption to find them a home'
     };
-    return descs[this.postType()];
+    return descs[this.selectedType];
   });
 
   imageUrl = '';
@@ -339,7 +358,7 @@ export class CreatePostComponent {
     this.loading.set(true);
 
     const result = this.postService.createPost({
-      type: this.postType(),
+      type: this.selectedType,
       imageUrl: this.imageUrl || undefined,
       description: this.description,
       location: this.location,

@@ -34,9 +34,9 @@ import { DatePipe } from '@angular/common';
       </div>
 
       @if (post.imageUrl) {
-        <div class="post-image">
+        <button class="post-image" type="button" (click)="openImagePreview()">
           <img [src]="post.imageUrl" [alt]="post.description" />
-        </div>
+        </button>
       }
 
       <div class="post-content">
@@ -45,38 +45,38 @@ import { DatePipe } from '@angular/common';
         <div class="post-details">
           <div class="detail-item">
             <span class="detail-label">Location:</span>
-            <span>{{ post.location }}</span>
+            <span class="detail-value">{{ post.location }}</span>
           </div>
           <div class="detail-item">
             <span class="detail-label">Date:</span>
-            <span>{{ post.date | date:'mediumDate' }}</span>
+            <span class="detail-value">{{ post.date | date:'mediumDate' }}</span>
           </div>
           <div class="detail-item">
             <span class="detail-label">Contact:</span>
-            <span>{{ post.contactInfo }}</span>
+            <span class="detail-value">{{ post.contactInfo }}</span>
           </div>
           @if (post.breed) {
             <div class="detail-item">
               <span class="detail-label">Breed:</span>
-              <span>{{ post.breed }}</span>
+              <span class="detail-value">{{ post.breed }}</span>
             </div>
           }
           @if (post.age) {
             <div class="detail-item">
               <span class="detail-label">Age:</span>
-              <span>{{ post.age }}</span>
+              <span class="detail-value">{{ post.age }}</span>
             </div>
           }
           @if (post.healthCondition) {
             <div class="detail-item">
               <span class="detail-label">Health:</span>
-              <span>{{ post.healthCondition }}</span>
+              <span class="detail-value">{{ post.healthCondition }}</span>
             </div>
           }
           @if (post.adoptionRequirements) {
             <div class="detail-item">
               <span class="detail-label">Requirements:</span>
-              <span>{{ post.adoptionRequirements }}</span>
+              <span class="detail-value">{{ post.adoptionRequirements }}</span>
             </div>
           }
         </div>
@@ -134,6 +134,17 @@ import { DatePipe } from '@angular/common';
               (keyup.enter)="submitComment()"
             />
             <button class="btn btn-primary btn-sm" (click)="submitComment()" [disabled]="!newComment.trim()">Post</button>
+          </div>
+        </div>
+      }
+
+      @if (showImagePreview()) {
+        <div class="image-preview-backdrop" (click)="closeImagePreview()">
+          <div class="image-preview-dialog" (click)="$event.stopPropagation()">
+            <button class="image-preview-close" type="button" (click)="closeImagePreview()" aria-label="Close image preview">
+              ✕
+            </button>
+            <img [src]="post.imageUrl" [alt]="post.description" />
           </div>
         </div>
       }
@@ -200,12 +211,60 @@ import { DatePipe } from '@angular/common';
       max-height: 400px;
       overflow: hidden;
       margin: 0.75rem 0;
+      border: none;
+      padding: 0;
+      background: transparent;
+      cursor: pointer;
     }
 
     .post-image img {
       width: 100%;
       height: 100%;
       object-fit: cover;
+      display: block;
+    }
+
+    .image-preview-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      z-index: 1000;
+    }
+
+    .image-preview-dialog {
+      position: relative;
+      max-width: min(90vw, 980px);
+      max-height: 90vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .image-preview-dialog img {
+      width: 100%;
+      max-height: 90vh;
+      object-fit: contain;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .image-preview-close {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      width: 2rem;
+      height: 2rem;
+      border: none;
+      border-radius: var(--radius-full);
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 1rem;
+      line-height: 1;
+      cursor: pointer;
     }
 
     .post-content {
@@ -234,9 +293,14 @@ import { DatePipe } from '@angular/common';
     }
 
     .detail-label {
-      font-weight: 600;
-      color: var(--text-muted);
+      font-weight: 400;
+      color: var(--text-secondary);
       font-size: 0.8125rem;
+    }
+
+    .detail-value {
+      font-weight: 700;
+      color: var(--text-primary);
     }
 
     .post-actions {
@@ -347,6 +411,7 @@ export class PostCardComponent {
   commentService = inject(CommentService);
 
   showComments = signal(false);
+  showImagePreview = signal(false);
   newComment = '';
   comments = signal<any[]>([]);
   commentCount = signal(0);
@@ -369,5 +434,13 @@ export class PostCardComponent {
     this.newComment = '';
     this.comments.set(this.commentService.getCommentsByPost(this.post.id));
     this.commentCount.set(this.comments().length);
+  }
+
+  openImagePreview(): void {
+    this.showImagePreview.set(true);
+  }
+
+  closeImagePreview(): void {
+    this.showImagePreview.set(false);
   }
 }

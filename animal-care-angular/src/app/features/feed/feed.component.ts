@@ -51,7 +51,17 @@ import { Post, PostType } from '../../core/models/post.model';
         <main class="feed-main">
           <div class="feed-header">
             <h2>Community Feed</h2>
-            <a routerLink="/create-post/lost" class="btn btn-primary">+ Create Post</a>
+            <a routerLink="/create-post" class="btn btn-primary">+ Create Post</a>
+          </div>
+
+          <div class="search-bar card">
+            <input
+              class="input-field"
+              type="text"
+              placeholder="Search by description, location, user, or contact..."
+              [value]="searchQuery()"
+              (input)="onSearchInput($event)"
+            />
           </div>
 
           @for (post of filteredPosts(); track post.id) {
@@ -67,7 +77,7 @@ import { Post, PostType } from '../../core/models/post.model';
             <div class="empty-state">
               <h3>No posts yet</h3>
               <p>Be the first to help an animal in need!</p>
-              <a routerLink="/create-post/lost" class="btn btn-primary">Create a Post</a>
+              <a routerLink="/create-post" class="btn btn-primary">Create a Post</a>
             </div>
           }
         </main>
@@ -140,6 +150,11 @@ import { Post, PostType } from '../../core/models/post.model';
       min-width: 0;
     }
 
+    .search-bar {
+      padding: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
     .feed-header {
       display: flex;
       align-items: center;
@@ -200,13 +215,37 @@ export class FeedComponent {
   private router = inject(Router);
 
   filter = signal<PostType | 'all'>('all');
+  searchQuery = signal('');
 
   filteredPosts = computed(() => {
     const posts = this.postService.posts();
     const f = this.filter();
-    const filtered = f === 'all' ? posts : posts.filter(p => p.type === f);
-    return [...filtered].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const q = this.searchQuery().trim().toLowerCase();
+    const typeFiltered = f === 'all' ? posts : posts.filter(p => p.type === f);
+    const searchFiltered = q
+      ? typeFiltered.filter(p => {
+          const text = [
+            p.description,
+            p.location,
+            p.userName,
+            p.contactInfo,
+            p.breed,
+            p.healthCondition
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return text.includes(q);
+        })
+      : typeFiltered;
+
+    return [...searchFiltered].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   });
+
+  onSearchInput(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.searchQuery.set(target?.value ?? '');
+  }
 
   onResolve(postId: string): void {
     const post = this.postService.getPostById(postId);
