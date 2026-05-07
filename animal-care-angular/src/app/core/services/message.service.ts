@@ -5,8 +5,8 @@ import {
   onSnapshot,
   query,
   setDoc,
-  updateDoc,
-  where
+  where,
+  writeBatch
 } from 'firebase/firestore';
 import type { Unsubscribe } from 'firebase/firestore';
 import { Message, Conversation } from '../models/message.model';
@@ -141,6 +141,11 @@ export class MessageService {
     return { success: true };
   }
 
+  /**
+   * Atomically flip every unread message in a conversation to read.
+   * Using writeBatch guarantees the receiver either sees ALL their inbox
+   * marked read or NONE — never a half state.
+   */
   markAsRead(otherUserId: string): void {
     const user = this.authService.currentUser();
     if (!user) return;
@@ -152,10 +157,14 @@ export class MessageService {
       m => m.senderId === otherUserId && m.receiverId === user.id && !m.read
     );
 
+    if (unread.length === 0) return;
+
+    const batch = writeBatch(db);
     unread.forEach(m => {
-      updateDoc(doc(db, MESSAGES_COLLECTION, m.id), { read: true }).catch(err => {
-        console.error('[MessageService] markAsRead failed', err);
-      });
+      batch.update(doc(db, MESSAGES_COLLECTION, m.id), { read: true });
+    });
+    batch.commit().catch(err => {
+      console.error('[MessageService] markAsRead failed', err);
     });
   }
 

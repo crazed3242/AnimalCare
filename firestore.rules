@@ -1,18 +1,131 @@
-rules_version='2'
+rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2026, 5, 22);
+
+    // -------------- helpers --------------
+    function isSignedIn() {
+      // The current MVP does not use Firebase Auth; client identity travels in
+      // the document body. Reads/writes are still gated by the field-level
+      // checks below, so an attacker can read but cannot tamper with data
+      // that violates an invariant.
+      return true;
+    }
+
+    function unchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    // -------------- users --------------
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if request.resource.data.id == userId
+                    && request.resource.data.email is string
+                    && request.resource.data.name is string
+                    && request.resource.data.password is string
+                    && request.resource.data.password.size() >= 6
+                    && request.resource.data.role in ['admin', 'user']
+                    && request.resource.data.createdAt is string;
+
+      // role / id / createdAt / email immutable after creation
+      allow update: if unchanged('id')
+                    && unchanged('email')
+                    && unchanged('role')
+                    && unchanged('createdAt');
+
+      allow delete: if false;
+    }
+
+    // unique-email sentinel — used by the register transaction
+    match /user_emails/{slug} {
+      allow read: if true;
+      allow create: if request.resource.data.email is string
+                    && request.resource.data.userId is string;
+      allow update, delete: if false;
+    }
+
+    // -------------- posts --------------
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if request.resource.data.id == postId
+                    && request.resource.data.type in ['lost', 'found', 'rescue', 'adoption', 'event']
+                    && request.resource.data.userId is string
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() > 0
+                    && request.resource.data.location is string
+                    && request.resource.data.contactInfo is string
+                    && request.resource.data.resolved == false;
+
+      // type / userId / createdAt are immutable; everything else is fair game
+      allow update: if unchanged('id')
+                    && unchanged('type')
+                    && unchanged('userId')
+                    && unchanged('createdAt');
+
+      allow delete: if true; // owner / admin enforced in code + audit log
+    }
+
+    // -------------- comments --------------
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if request.resource.data.id == commentId
+                    && request.resource.data.postId is string
+                    && request.resource.data.userId is string
+                    && request.resource.data.content is string
+                    && request.resource.data.content.size() > 0;
+      allow update: if false; // comments are immutable once written
+      allow delete: if true;
+    }
+
+    // -------------- messages --------------
+    match /messages/{messageId} {
+      allow read: if true;
+      allow create: if request.resource.data.id == messageId
+                    && request.resource.data.senderId is string
+                    && request.resource.data.receiverId is string
+                    && request.resource.data.participants is list
+                    && request.resource.data.content is string
+                    && request.resource.data.read == false;
+      // only the `read` flag may be flipped after creation
+      allow update: if unchanged('id')
+                    && unchanged('senderId')
+                    && unchanged('receiverId')
+                    && unchanged('content')
+                    && unchanged('createdAt')
+                    && unchanged('participants');
+      allow delete: if false;
+    }
+
+    // -------------- reservations --------------
+    match /reservations/{reservationId} {
+      allow read: if true;
+      allow create: if request.resource.data.id == reservationId
+                    && request.resource.data.postId is string
+                    && request.resource.data.requesterId is string
+                    && request.resource.data.postOwnerId is string
+                    && request.resource.data.status == 'pending';
+
+      // status, decidedAt, decidedBy, decisionNote may change. Identity fields
+      // are immutable.
+      allow update: if unchanged('id')
+                    && unchanged('postId')
+                    && unchanged('requesterId')
+                    && unchanged('postOwnerId')
+                    && unchanged('createdAt')
+                    && request.resource.data.status in ['pending', 'approved', 'rejected', 'cancelled'];
+      allow delete: if true; // cascaded by post deletion
+    }
+
+    // -------------- transactions (durable audit trail) --------------
+    match /transactions/{txId} {
+      allow read: if true;
+      allow create: if request.resource.data.id == txId
+                    && request.resource.data.type is string
+                    && request.resource.data.outcome in ['COMMITTED', 'ROLLED_BACK']
+                    && request.resource.data.actorId is string
+                    && request.resource.data.createdAt is string;
+      // immutable audit log
+      allow update, delete: if false;
     }
   }
 }

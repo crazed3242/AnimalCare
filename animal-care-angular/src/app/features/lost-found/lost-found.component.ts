@@ -1,5 +1,5 @@
 import { Component, inject, signal, computed } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { PostService } from '../../core/services/post.service';
 import { CommentService } from '../../core/services/comment.service';
 import { MessageService } from '../../core/services/message.service';
@@ -10,7 +10,7 @@ import { Post } from '../../core/models/post.model';
 @Component({
   selector: 'app-lost-found',
   standalone: true,
-  imports: [PostCardComponent, NavbarComponent, RouterLink],
+  imports: [PostCardComponent, NavbarComponent],
   template: `
     <app-navbar />
 
@@ -19,10 +19,6 @@ import { Post } from '../../core/models/post.model';
         <div class="category-info">
           <h1>Lost & Found Pets</h1>
           <p>Help reunite pets with their families</p>
-        </div>
-        <div class="category-actions">
-          <a routerLink="/create-post/lost" class="btn btn-danger">Report Lost</a>
-          <a routerLink="/create-post/found" class="btn btn-secondary">Report Found</a>
         </div>
       </div>
 
@@ -75,11 +71,6 @@ import { Post } from '../../core/models/post.model';
     .category-header p {
       color: var(--text-muted);
       margin-top: 0.25rem;
-    }
-
-    .category-actions {
-      display: flex;
-      gap: 0.5rem;
     }
 
     .category-filters {

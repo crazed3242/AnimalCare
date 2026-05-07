@@ -1,9 +1,11 @@
-import { Component, Input, Output, EventEmitter, inject, signal } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject, signal, computed } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Post } from '../../core/models/post.model';
+import { Reservation } from '../../core/models/reservation.model';
 import { AuthService } from '../../core/services/auth.service';
 import { CommentService } from '../../core/services/comment.service';
+import { TransactionService } from '../../core/services/transaction.service';
 import { DatePipe } from '@angular/common';
 
 @Component({
@@ -30,6 +32,24 @@ import { DatePipe } from '@angular/common';
           @if (post.resolved) {
             <span class="badge badge-resolved">Resolved</span>
           }
+          @if (post.type === 'adoption' && post.reservationStatus === 'reserved') {
+            <span class="badge badge-reserved" title="Pending adoption reservation">Reserved</span>
+          }
+          @if (post.type === 'adoption' && post.reservationStatus === 'adopted') {
+            <span class="badge badge-adopted" title="Adoption complete">Adopted</span>
+          }
+          @if (post.type === 'event' && post.eventCategory) {
+            <span class="badge badge-event-cat">{{ formatEventCategory(post.eventCategory) }}</span>
+          }
+          @if (post.type === 'event' && post.eventStatus === 'proposed') {
+            <span class="badge badge-event-proposed" title="Awaiting admin approval">Pending Approval</span>
+          }
+          @if (post.type === 'event' && post.eventStatus === 'approved') {
+            <span class="badge badge-event-approved" title="Approved by admin">Approved</span>
+          }
+          @if (post.type === 'event' && post.eventStatus === 'rejected') {
+            <span class="badge badge-event-rejected" title="Rejected by admin">Rejected</span>
+          }
         </div>
       </div>
 
@@ -40,17 +60,38 @@ import { DatePipe } from '@angular/common';
       }
 
       <div class="post-content">
+        @if (post.type === 'event' && post.eventName) {
+          <h3 class="event-title">{{ post.eventName }}</h3>
+        }
         <p class="post-description">{{ post.description }}</p>
 
         <div class="post-details">
           <div class="detail-item">
-            <span class="detail-label">Location:</span>
+            <span class="detail-label">{{ post.type === 'event' ? 'Venue:' : 'Location:' }}</span>
             <span class="detail-value">{{ post.location }}</span>
           </div>
           <div class="detail-item">
-            <span class="detail-label">Date:</span>
+            <span class="detail-label">{{ post.type === 'event' ? 'Starts:' : 'Date:' }}</span>
             <span class="detail-value">{{ post.date | date:'mediumDate' }}</span>
           </div>
+          @if (post.type === 'event' && post.eventEndDate) {
+            <div class="detail-item">
+              <span class="detail-label">Ends:</span>
+              <span class="detail-value">{{ post.eventEndDate | date:'mediumDate' }}</span>
+            </div>
+          }
+          @if (post.type === 'event' && post.organizerName) {
+            <div class="detail-item">
+              <span class="detail-label">Organizer:</span>
+              <span class="detail-value">{{ post.organizerName }}</span>
+            </div>
+          }
+          @if (post.type === 'event' && post.expectedAttendees) {
+            <div class="detail-item">
+              <span class="detail-label">Attendees:</span>
+              <span class="detail-value">{{ post.expectedAttendees }}</span>
+            </div>
+          }
           <div class="detail-item">
             <span class="detail-label">Contact:</span>
             <span class="detail-value">{{ post.contactInfo }}</span>
@@ -95,11 +136,95 @@ import { DatePipe } from '@angular/common';
           <button class="btn btn-ghost btn-sm" (click)="message.emit(post)">
             Message
           </button>
+          @if (canRequestAdoption()) {
+            <button class="btn btn-primary btn-sm" (click)="toggleReserveForm()">
+              {{ showReserveForm() ? 'Close' : 'Request to Adopt' }}
+            </button>
+          }
+          @if (myPendingReservation()) {
+            <button class="btn btn-outline btn-sm" (click)="cancelMyReservation()" [disabled]="txBusy()">
+              Cancel Reservation
+            </button>
+          }
+        }
+        @if (post.type === 'event' && post.eventStatus === 'proposed' && authService.isAdmin()) {
+          <button class="btn btn-primary btn-sm" (click)="approveEvent.emit(post.id)">
+            Approve
+          </button>
+          <button class="btn btn-outline btn-sm" (click)="rejectEvent.emit(post.id)" style="color: var(--danger); border-color: var(--danger);">
+            Reject
+          </button>
         }
         <button class="btn btn-ghost btn-sm" (click)="toggleComments()">
           Comments ({{ commentCount() }})
         </button>
       </div>
+
+      @if (post.type === 'event' && (post.eventStatus === 'approved' || post.eventStatus === 'rejected') && post.eventDecidedBy) {
+        <div class="event-decision-note">
+          {{ post.eventStatus === 'approved' ? 'Approved' : 'Rejected' }} by {{ post.eventDecidedBy }}
+          @if (post.eventDecidedAt) {
+            on {{ post.eventDecidedAt | date:'short' }}
+          }
+        </div>
+      }
+
+      @if (post.type === 'adoption') {
+        <div class="reservation-panel">
+          @if (showReserveForm() && canRequestAdoption()) {
+            <div class="reserve-form">
+              <label class="reserve-label">Tell {{ post.userName }} why you'd be a great adopter:</label>
+              <textarea
+                class="input-field"
+                rows="2"
+                placeholder="A short note about your home, experience, etc."
+                [(ngModel)]="reserveMessage"
+              ></textarea>
+              <div class="reserve-actions">
+                <button class="btn btn-primary btn-sm" (click)="submitReservation()" [disabled]="txBusy() || !reserveMessage.trim()">
+                  {{ txBusy() ? 'Submitting...' : 'Submit reservation (atomic)' }}
+                </button>
+                @if (txError()) {
+                  <span class="reserve-error">{{ txError() }}</span>
+                }
+              </div>
+            </div>
+          }
+
+          @if (isOwner() && pendingReservations().length > 0) {
+            <div class="owner-decisions">
+              <h4 class="reserve-heading">Pending adoption requests</h4>
+              @for (r of pendingReservations(); track r.id) {
+                <div class="decision-row">
+                  <img class="decision-avatar" [src]="r.requesterAvatarUrl" [alt]="r.requesterName" />
+                  <div class="decision-body">
+                    <strong>{{ r.requesterName }}</strong>
+                    <p class="decision-msg">{{ r.message }}</p>
+                    <span class="decision-time">{{ r.createdAt | date:'short' }}</span>
+                  </div>
+                  <div class="decision-actions">
+                    <button class="btn btn-primary btn-sm" (click)="approveReservation(r.id)" [disabled]="txBusy()">Approve</button>
+                    <button class="btn btn-outline btn-sm" (click)="rejectReservation(r.id)" [disabled]="txBusy()">Reject</button>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+
+          @if (decidedReservations().length > 0 && (isOwner() || hasMyReservation())) {
+            <details class="reservation-history">
+              <summary>Reservation history ({{ decidedReservations().length }})</summary>
+              @for (r of decidedReservations(); track r.id) {
+                <div class="history-row">
+                  <span class="badge badge-{{ r.status }}">{{ r.status }}</span>
+                  <span>{{ r.requesterName }}</span>
+                  <span class="history-time">{{ (r.decidedAt || r.createdAt) | date:'short' }}</span>
+                </div>
+              }
+            </details>
+          }
+        </div>
+      }
 
       @if (showComments()) {
         <div class="comments-section">
@@ -397,6 +522,162 @@ import { DatePipe } from '@angular/common';
     .comment-form input {
       flex: 1;
     }
+
+    .badge-reserved {
+      background: rgba(245, 158, 11, 0.15);
+      color: #b45309;
+    }
+
+    .badge-adopted {
+      background: rgba(16, 185, 129, 0.15);
+      color: #047857;
+    }
+
+    .event-title {
+      font-size: 1.125rem;
+      font-weight: 800;
+      color: var(--text-primary);
+      margin-bottom: 0.5rem;
+    }
+
+    .badge-event-cat {
+      background: #EDE9FE;
+      color: #5B21B6;
+    }
+
+    .badge-event-proposed {
+      background: rgba(245, 158, 11, 0.18);
+      color: #b45309;
+    }
+
+    .badge-event-approved {
+      background: rgba(16, 185, 129, 0.18);
+      color: #047857;
+    }
+
+    .badge-event-rejected {
+      background: rgba(239, 68, 68, 0.18);
+      color: #b91c1c;
+    }
+
+    .event-decision-note {
+      padding: 0.5rem 1.25rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      border-top: 1px dashed var(--border);
+    }
+
+    .badge-pending { background: rgba(245, 158, 11, 0.15); color: #b45309; }
+    .badge-approved { background: rgba(16, 185, 129, 0.15); color: #047857; }
+    .badge-rejected { background: rgba(239, 68, 68, 0.15); color: #b91c1c; }
+    .badge-cancelled { background: rgba(107, 114, 128, 0.15); color: #374151; }
+
+    .reservation-panel {
+      border-top: 1px solid var(--border);
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .reserve-label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      margin-bottom: 0.375rem;
+    }
+
+    .reserve-form textarea {
+      width: 100%;
+      resize: vertical;
+    }
+
+    .reserve-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .reserve-error {
+      color: var(--danger);
+      font-size: 0.8125rem;
+    }
+
+    .owner-decisions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .reserve-heading {
+      font-size: 0.875rem;
+      font-weight: 800;
+      margin: 0;
+    }
+
+    .decision-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem;
+      background: var(--bg-soft, #f9fafb);
+      border-radius: var(--radius);
+    }
+
+    .decision-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-full);
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .decision-body {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .decision-msg {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      margin: 0.25rem 0;
+    }
+
+    .decision-time {
+      font-size: 0.6875rem;
+      color: var(--text-muted);
+    }
+
+    .decision-actions {
+      display: flex;
+      gap: 0.375rem;
+    }
+
+    .reservation-history {
+      font-size: 0.8125rem;
+    }
+
+    .reservation-history summary {
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .history-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.25rem 0;
+    }
+
+    .history-time {
+      margin-left: auto;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+    }
   `]
 })
 export class PostCardComponent {
@@ -406,15 +687,65 @@ export class PostCardComponent {
   @Output() message = new EventEmitter<Post>();
   @Output() deleteComment = new EventEmitter<string>();
   @Output() addComment = new EventEmitter<{ postId: string; content: string }>();
+  @Output() approveEvent = new EventEmitter<string>();
+  @Output() rejectEvent = new EventEmitter<string>();
+
+  formatEventCategory(value: string): string {
+    return value.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
 
   authService = inject(AuthService);
   commentService = inject(CommentService);
+  transactionService = inject(TransactionService);
 
   showComments = signal(false);
   showImagePreview = signal(false);
+  showReserveForm = signal(false);
+  txBusy = signal(false);
+  txError = signal<string | null>(null);
+  reserveMessage = '';
   newComment = '';
   comments = signal<any[]>([]);
   commentCount = signal(0);
+
+  isOwner = computed(() => this.authService.currentUser()?.id === this.post?.userId);
+
+  postReservations = computed<Reservation[]>(() => {
+    if (!this.post) return [];
+    return this.transactionService.getReservationsForPost(this.post.id);
+  });
+
+  pendingReservations = computed(() =>
+    this.postReservations().filter(r => r.status === 'pending')
+  );
+
+  decidedReservations = computed(() =>
+    this.postReservations().filter(r => r.status !== 'pending')
+  );
+
+  myPendingReservation = computed<Reservation | undefined>(() => {
+    const me = this.authService.currentUser();
+    if (!me || !this.post) return undefined;
+    return this.transactionService.getActiveReservationByUser(this.post.id, me.id);
+  });
+
+  hasMyReservation = computed(() => {
+    const me = this.authService.currentUser();
+    if (!me) return false;
+    return this.postReservations().some(r => r.requesterId === me.id);
+  });
+
+  canRequestAdoption = computed(() => {
+    const me = this.authService.currentUser();
+    if (!me || !this.post) return false;
+    if (this.post.type !== 'adoption') return false;
+    if (this.post.userId === me.id) return false;
+    if (this.post.resolved) return false;
+    if (this.post.reservationStatus === 'adopted') return false;
+    if (this.post.reservationStatus === 'reserved' && this.post.reservedBy !== me.id) return false;
+    if (this.myPendingReservation()) return false;
+    return true;
+  });
 
   ngOnChanges(): void {
     this.commentCount.set(this.commentService.getCommentCount(this.post.id));
@@ -442,5 +773,52 @@ export class PostCardComponent {
 
   closeImagePreview(): void {
     this.showImagePreview.set(false);
+  }
+
+  toggleReserveForm(): void {
+    this.txError.set(null);
+    this.showReserveForm.update(v => !v);
+  }
+
+  async submitReservation(): Promise<void> {
+    if (!this.reserveMessage.trim() || this.txBusy()) return;
+    this.txBusy.set(true);
+    this.txError.set(null);
+    const result = await this.transactionService.reserveForAdoption({
+      postId: this.post.id,
+      message: this.reserveMessage
+    });
+    this.txBusy.set(false);
+    if (result.success) {
+      this.reserveMessage = '';
+      this.showReserveForm.set(false);
+    } else {
+      this.txError.set(result.error || 'Reservation failed.');
+    }
+  }
+
+  async cancelMyReservation(): Promise<void> {
+    const r = this.myPendingReservation();
+    if (!r || this.txBusy()) return;
+    this.txBusy.set(true);
+    const result = await this.transactionService.cancelReservation(r.id);
+    this.txBusy.set(false);
+    if (!result.success) this.txError.set(result.error || 'Cancel failed.');
+  }
+
+  async approveReservation(reservationId: string): Promise<void> {
+    if (this.txBusy()) return;
+    this.txBusy.set(true);
+    const result = await this.transactionService.approveReservation(reservationId);
+    this.txBusy.set(false);
+    if (!result.success) this.txError.set(result.error || 'Approve failed.');
+  }
+
+  async rejectReservation(reservationId: string): Promise<void> {
+    if (this.txBusy()) return;
+    this.txBusy.set(true);
+    const result = await this.transactionService.rejectReservation(reservationId);
+    this.txBusy.set(false);
+    if (!result.success) this.txError.set(result.error || 'Reject failed.');
   }
 }

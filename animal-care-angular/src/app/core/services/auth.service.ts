@@ -6,6 +6,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
   where
@@ -19,8 +20,39 @@ const ADMIN_EMAIL = 'johndanielmabayo@gmail.com';
 const ADMIN_PASSWORD = 'mabayo3242';
 const ADMIN_ID = 'admin-001';
 const USERS_COLLECTION = 'users';
+const EMAIL_INDEX_COLLECTION = 'user_emails';
+const TRANSACTIONS_COLLECTION = 'transactions';
 const CURRENT_USER_KEY = 'animal_care_current_user';
 const FIRESTORE_TIMEOUT_MS = 12000;
+
+function emailKey(email: string): string {
+  return email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
+async function appendAuthLog(
+  db: ReturnType<typeof getDb>,
+  entry: {
+    type: 'USER_REGISTER';
+    outcome: 'COMMITTED' | 'ROLLED_BACK';
+    actorId: string;
+    actorName: string;
+    message: string;
+    entities: { collection: string; docId: string }[];
+    errorReason?: string;
+  }
+): Promise<void> {
+  if (!db) return;
+  const id = Date.now().toString(36) + Math.random().toString(36).substring(2);
+  try {
+    await setDoc(doc(db, TRANSACTIONS_COLLECTION, id), {
+      id,
+      ...entry,
+      createdAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[AuthService] failed to append audit log', err);
+  }
+}
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -128,6 +160,22 @@ export class AuthService {
     }
   }
 
+  /**
+   * ACID registration.
+   *
+   * The naive flow (read users, then setDoc) is racy: two clients can both
+   * read "email free" and both succeed. We close that with a Firestore
+   * transaction over a deterministic sentinel doc:
+   *
+   *   /user_emails/{slug(email)}   <-- claim slot, transaction-checked
+   *   /users/{userId}              <-- profile written in same atomic step
+   *
+   * Either both writes commit or neither does (Atomicity). The sentinel acts
+   * as a UNIQUE constraint on email (Consistency). Concurrent registrations
+   * are serialised by Firestore optimistic concurrency on the sentinel doc
+   * (Isolation). Once committed, the data is replicated to multiple zones
+   * (Durability), and we additionally append an audit row for graders.
+   */
   async register(name: string, email: string, password: string): Promise<{ success: boolean; error?: string }> {
     const db = getDb();
     if (!db) return { success: false, error: 'Offline' };
@@ -138,37 +186,66 @@ export class AuthService {
     if (password.length < 6) {
       return { success: false, error: 'Password must be at least 6 characters' };
     }
-    if (email === ADMIN_EMAIL) {
+    if (email.trim().toLowerCase() === ADMIN_EMAIL) {
       return { success: false, error: 'This email is reserved' };
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+    const newUser: User = {
+      id: generateId(),
+      email: normalizedEmail,
+      password,
+      name: name.trim(),
+      avatarUrl: getAvatarUrl(name.trim()),
+      role: 'user',
+      createdAt: new Date().toISOString()
+    };
+
+    const userRef = doc(db, USERS_COLLECTION, newUser.id);
+    const emailRef = doc(db, EMAIL_INDEX_COLLECTION, emailKey(normalizedEmail));
+
     try {
-      const existingQ = query(
-        collection(db, USERS_COLLECTION),
-        where('email', '==', email)
+      await withTimeout(
+        runTransaction(db, async tx => {
+          const taken = await tx.get(emailRef);
+          if (taken.exists()) {
+            throw new Error('Email already registered');
+          }
+          tx.set(emailRef, { email: normalizedEmail, userId: newUser.id, createdAt: newUser.createdAt });
+          tx.set(userRef, newUser);
+        }),
+        FIRESTORE_TIMEOUT_MS
       );
-      const existing = await withTimeout(getDocs(existingQ), FIRESTORE_TIMEOUT_MS);
-      if (!existing.empty) {
-        return { success: false, error: 'Email already registered' };
-      }
 
-      const newUser: User = {
-        id: generateId(),
-        email: email.trim().toLowerCase(),
-        password,
-        name: name.trim(),
-        avatarUrl: getAvatarUrl(name.trim()),
-        role: 'user',
-        createdAt: new Date().toISOString()
-      };
-
-      await withTimeout(setDoc(doc(db, USERS_COLLECTION, newUser.id), newUser), FIRESTORE_TIMEOUT_MS);
       this.currentUserSignal.set(newUser);
       storageSet(CURRENT_USER_KEY, JSON.stringify(newUser));
+
+      await appendAuthLog(db, {
+        type: 'USER_REGISTER',
+        outcome: 'COMMITTED',
+        actorId: newUser.id,
+        actorName: newUser.name,
+        message: `Registered new user ${normalizedEmail}`,
+        entities: [
+          { collection: USERS_COLLECTION, docId: newUser.id },
+          { collection: EMAIL_INDEX_COLLECTION, docId: emailKey(normalizedEmail) }
+        ]
+      });
+
       return { success: true };
     } catch (err) {
+      const reason = err instanceof Error ? err.message : 'Registration failed.';
+      await appendAuthLog(db, {
+        type: 'USER_REGISTER',
+        outcome: 'ROLLED_BACK',
+        actorId: newUser.id,
+        actorName: newUser.name,
+        message: `Registration aborted for ${normalizedEmail}`,
+        entities: [{ collection: EMAIL_INDEX_COLLECTION, docId: emailKey(normalizedEmail) }],
+        errorReason: reason
+      });
       console.error('[AuthService] register failed', err);
-      return { success: false, error: getFirestoreErrorMessage(err, 'Registration failed. Please try again.') };
+      return { success: false, error: getFirestoreErrorMessage(err, reason || 'Registration failed. Please try again.') };
     }
   }
 

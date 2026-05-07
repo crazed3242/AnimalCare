@@ -20,6 +20,7 @@ import { MessageService } from '../../core/services/message.service';
           <a routerLink="/lost-found" routerLinkActive="active" (click)="menuOpen.set(false)">Lost & Found</a>
           <a routerLink="/rescue" routerLinkActive="active" (click)="menuOpen.set(false)">Rescue</a>
           <a routerLink="/adoption" routerLinkActive="active" (click)="menuOpen.set(false)">Adoption</a>
+          <a routerLink="/events" routerLinkActive="active" (click)="menuOpen.set(false)">Events</a>
           <a routerLink="/messages" routerLinkActive="active" (click)="menuOpen.set(false)" class="messages-link">
             Messages
             @if (unreadCount() > 0) {

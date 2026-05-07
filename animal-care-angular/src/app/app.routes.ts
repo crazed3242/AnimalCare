@@ -38,6 +38,11 @@ export const routes: Routes = [
     loadComponent: () => import('./features/adoption/adoption.component').then(m => m.AdoptionComponent)
   },
   {
+    path: 'events',
+    canActivate: [userGuard],
+    loadComponent: () => import('./features/events/events.component').then(m => m.EventsComponent)
+  },
+  {
     path: 'create-post',
     canActivate: [userGuard],
     loadComponent: () => import('./features/create-post/create-post.component').then(m => m.CreatePostComponent)

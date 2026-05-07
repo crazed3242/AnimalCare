@@ -240,6 +240,11 @@ textarea.input-field {
   color: #2563EB;
 }
 
+.badge-event {
+  background: #EDE9FE;
+  color: #5B21B6;
+}
+
 .badge-urgency-low {
   background: #D1FAE5;
   color: #059669;

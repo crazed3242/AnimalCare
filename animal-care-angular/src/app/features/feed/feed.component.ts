@@ -33,6 +33,9 @@ import { Post, PostType } from '../../core/models/post.model';
               <a routerLink="/create-post/adoption" class="sidebar-link">
                 Post for Adoption
               </a>
+              <a routerLink="/create-post/event" class="sidebar-link sidebar-link-event">
+                Propose Event / Program
+              </a>
             </nav>
           </div>
 
@@ -44,6 +47,7 @@ import { Post, PostType } from '../../core/models/post.model';
               <button class="btn btn-sm" [class.btn-primary]="filter() === 'found'" [class.btn-outline]="filter() !== 'found'" (click)="filter.set('found')">Found</button>
               <button class="btn btn-sm" [class.btn-primary]="filter() === 'rescue'" [class.btn-outline]="filter() !== 'rescue'" (click)="filter.set('rescue')">Rescue</button>
               <button class="btn btn-sm" [class.btn-primary]="filter() === 'adoption'" [class.btn-outline]="filter() !== 'adoption'" (click)="filter.set('adoption')">Adoption</button>
+              <button class="btn btn-sm" [class.btn-primary]="filter() === 'event'" [class.btn-outline]="filter() !== 'event'" (click)="filter.set('event')">Events</button>
             </div>
           </div>
         </aside>
@@ -72,6 +76,8 @@ import { Post, PostType } from '../../core/models/post.model';
               (message)="onMessage($event)"
               (deleteComment)="onDeleteComment($event)"
               (addComment)="onAddComment($event)"
+              (approveEvent)="onApproveEvent($event)"
+              (rejectEvent)="onRejectEvent($event)"
             />
           } @empty {
             <div class="empty-state">
@@ -138,6 +144,15 @@ import { Post, PostType } from '../../core/models/post.model';
     .sidebar-link:hover {
       background: var(--bg-secondary);
       color: var(--primary-dark);
+    }
+
+    .sidebar-link-event {
+      color: #5B21B6;
+    }
+
+    .sidebar-link-event:hover {
+      background: #EDE9FE;
+      color: #4C1D95;
     }
 
     .filter-buttons {
@@ -274,5 +289,17 @@ export class FeedComponent {
 
   onAddComment(event: { postId: string; content: string }): void {
     this.commentService.addComment(event.postId, event.content);
+  }
+
+  onApproveEvent(postId: string): void {
+    if (confirm('Approve this proposed event?')) {
+      this.postService.decideEvent(postId, 'approved');
+    }
+  }
+
+  onRejectEvent(postId: string): void {
+    if (confirm('Reject this proposed event?')) {
+      this.postService.decideEvent(postId, 'rejected');
+    }
   }
 }

@@ -4,7 +4,7 @@ import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { PostService } from '../../core/services/post.service';
 import { AuthService } from '../../core/services/auth.service';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
-import { PostType, UrgencyLevel } from '../../core/models/post.model';
+import { PostType, UrgencyLevel, EventCategory } from '../../core/models/post.model';
 
 @Component({
   selector: 'app-create-post',
@@ -64,11 +64,11 @@ import { PostType, UrgencyLevel } from '../../core/models/post.model';
 
           <div class="form-row">
             <div class="form-group">
-              <label for="location">Location *</label>
-              <input id="location" type="text" class="input-field" [(ngModel)]="location" name="location" placeholder="City, area, or address" required />
+              <label for="location">{{ selectedType === 'event' ? 'Venue / Location *' : 'Location *' }}</label>
+              <input id="location" type="text" class="input-field" [(ngModel)]="location" name="location" [placeholder]="selectedType === 'event' ? 'Venue, city, or full address' : 'City, area, or address'" required />
             </div>
             <div class="form-group">
-              <label for="date">Date *</label>
+              <label for="date">{{ selectedType === 'event' ? 'Event Start Date *' : 'Date *' }}</label>
               <input id="date" type="date" class="input-field" [(ngModel)]="date" name="date" required />
             </div>
           </div>
@@ -111,12 +111,48 @@ import { PostType, UrgencyLevel } from '../../core/models/post.model';
             </div>
           }
 
+          @if (selectedType === 'event') {
+            <div class="event-banner">
+              Proposed events appear in the feed immediately with a <strong>Pending Approval</strong> badge,
+              and become officially highlighted once an admin approves them.
+            </div>
+            <div class="form-group">
+              <label for="eventName">Event Name *</label>
+              <input id="eventName" type="text" class="input-field" [(ngModel)]="eventName" name="eventName" placeholder="e.g., Spring Dog Show 2026" required />
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="eventCategory">Event Category *</label>
+                <select id="eventCategory" class="input-field" [(ngModel)]="eventCategory" name="eventCategory" required>
+                  <option value="" disabled>Select a category</option>
+                  @for (option of eventCategoryOptions; track option.value) {
+                    <option [value]="option.value">{{ option.label }}</option>
+                  }
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="eventEndDate">Event End Date</label>
+                <input id="eventEndDate" type="date" class="input-field" [(ngModel)]="eventEndDate" name="eventEndDate" [min]="date" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="organizerName">Organizer Name</label>
+                <input id="organizerName" type="text" class="input-field" [(ngModel)]="organizerName" name="organizerName" placeholder="Defaults to your name" />
+              </div>
+              <div class="form-group">
+                <label for="expectedAttendees">Expected Attendees</label>
+                <input id="expectedAttendees" type="text" class="input-field" [(ngModel)]="expectedAttendees" name="expectedAttendees" placeholder="e.g., 50, 100+, open to all" />
+              </div>
+            </div>
+          }
+
           <div class="form-actions">
             <button type="submit" class="btn btn-primary btn-lg" [disabled]="loading()">
               @if (loading()) {
                 Posting...
               } @else {
-                Create Post
+                {{ selectedType === 'event' ? 'Submit Event Proposal' : 'Create Post' }}
               }
             </button>
             <a routerLink="/feed" class="btn btn-outline btn-lg">Cancel</a>
@@ -268,6 +304,20 @@ import { PostType, UrgencyLevel } from '../../core/models/post.model';
       margin-top: 0.5rem;
     }
 
+    .event-banner {
+      background: #EDE9FE;
+      color: #5B21B6;
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      line-height: 1.45;
+      border-left: 3px solid #7C3AED;
+    }
+
+    .event-banner strong {
+      color: #4C1D95;
+    }
+
     @media (max-width: 600px) {
       .form-row {
         grid-template-columns: 1fr;
@@ -287,7 +337,17 @@ export class CreatePostComponent {
     { value: 'lost', label: 'Lost Pet' },
     { value: 'found', label: 'Found Pet' },
     { value: 'rescue', label: 'Rescue Animal' },
-    { value: 'adoption', label: 'Adoption' }
+    { value: 'adoption', label: 'Adoption' },
+    { value: 'event', label: 'Propose Event / Program' }
+  ];
+  eventCategoryOptions: { value: EventCategory; label: string }[] = [
+    { value: 'dog-show', label: 'Dog Show' },
+    { value: 'pet-show', label: 'Pet Show' },
+    { value: 'adoption-drive', label: 'Adoption Drive' },
+    { value: 'fundraiser', label: 'Fundraiser' },
+    { value: 'workshop', label: 'Workshop / Training' },
+    { value: 'vaccination-drive', label: 'Vaccination Drive' },
+    { value: 'other', label: 'Other' }
   ];
   selectedType: PostType = this.routeType || 'lost';
 
@@ -297,7 +357,8 @@ export class CreatePostComponent {
       lost: 'Report Lost Pet',
       found: 'Report Found Pet',
       rescue: 'Report Rescue Animal',
-      adoption: 'Post Pet for Adoption'
+      adoption: 'Post Pet for Adoption',
+      event: 'Propose an Event or Program'
     };
     return titles[this.selectedType];
   });
@@ -308,7 +369,8 @@ export class CreatePostComponent {
       lost: 'Help find your lost pet by providing details',
       found: 'Help reunite a found pet with its owner',
       rescue: 'Report an animal that needs urgent help',
-      adoption: 'List a pet for adoption to find them a home'
+      adoption: 'List a pet for adoption to find them a home',
+      event: 'Submit your dog show, pet show, fundraiser, or program for community review'
     };
     return descs[this.selectedType];
   });
@@ -324,6 +386,11 @@ export class CreatePostComponent {
   age = '';
   healthCondition = '';
   adoptionRequirements = '';
+  eventName = '';
+  eventCategory: EventCategory | '' = '';
+  eventEndDate = '';
+  organizerName = '';
+  expectedAttendees = '';
 
   error = signal('');
   success = signal('');
@@ -368,14 +435,23 @@ export class CreatePostComponent {
       breed: this.breed || undefined,
       age: this.age || undefined,
       healthCondition: this.healthCondition || undefined,
-      adoptionRequirements: this.adoptionRequirements || undefined
+      adoptionRequirements: this.adoptionRequirements || undefined,
+      eventName: this.eventName || undefined,
+      eventCategory: this.eventCategory || undefined,
+      eventEndDate: this.eventEndDate || undefined,
+      organizerName: this.organizerName || undefined,
+      expectedAttendees: this.expectedAttendees || undefined
     });
 
     this.loading.set(false);
 
     if (result.success) {
-      this.success.set('Post created successfully!');
-      setTimeout(() => this.router.navigate(['/feed']), 1000);
+      const successMsg = this.selectedType === 'event'
+        ? 'Event proposed! It will appear in the feed once an admin approves it.'
+        : 'Post created successfully!';
+      this.success.set(successMsg);
+      const target = this.selectedType === 'event' ? '/events' : '/feed';
+      setTimeout(() => this.router.navigate([target]), 1200);
     } else {
       this.error.set(result.error || 'Failed to create post');
     }

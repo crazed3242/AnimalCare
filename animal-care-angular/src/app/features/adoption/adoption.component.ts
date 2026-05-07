@@ -1,5 +1,5 @@
 import { Component, inject, computed } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { PostService } from '../../core/services/post.service';
 import { CommentService } from '../../core/services/comment.service';
 import { MessageService } from '../../core/services/message.service';
@@ -10,7 +10,7 @@ import { Post } from '../../core/models/post.model';
 @Component({
   selector: 'app-adoption',
   standalone: true,
-  imports: [PostCardComponent, NavbarComponent, RouterLink],
+  imports: [PostCardComponent, NavbarComponent],
   template: `
     <app-navbar />
 
@@ -20,7 +20,6 @@ import { Post } from '../../core/models/post.model';
           <h1>Pets for Adoption</h1>
           <p>Find your perfect companion</p>
         </div>
-        <a routerLink="/create-post/adoption" class="btn btn-primary">Post for Adoption</a>
       </div>
 
       <div class="posts-grid">

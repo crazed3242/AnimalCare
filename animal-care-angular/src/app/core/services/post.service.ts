@@ -1,7 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import {
   collection,
-  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
@@ -17,6 +16,8 @@ import { getDb } from '../firebase/firebase';
 
 const POSTS_COLLECTION = 'posts';
 const COMMENTS_COLLECTION = 'comments';
+const RESERVATIONS_COLLECTION = 'reservations';
+const TRANSACTIONS_COLLECTION = 'transactions';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -71,6 +72,14 @@ export class PostService {
       if (!request.age?.trim()) return { success: false, error: 'Age is required for adoption posts' };
     }
 
+    if (request.type === 'event') {
+      if (!request.eventName?.trim()) return { success: false, error: 'Event name is required' };
+      if (!request.eventCategory) return { success: false, error: 'Event category is required' };
+      if (request.eventEndDate && request.eventEndDate < request.date) {
+        return { success: false, error: 'End date cannot be before the start date' };
+      }
+    }
+
     const db = getDb();
     if (!db) return { success: false, error: 'Offline' };
 
@@ -92,13 +101,38 @@ export class PostService {
       age: request.age,
       healthCondition: request.healthCondition,
       adoptionRequirements: request.adoptionRequirements,
+      reservationStatus: request.type === 'adoption' ? 'available' : undefined,
+      eventName: request.eventName?.trim(),
+      eventCategory: request.eventCategory,
+      eventEndDate: request.eventEndDate,
+      organizerName: request.organizerName?.trim() || (request.type === 'event' ? user.name : undefined),
+      expectedAttendees: request.expectedAttendees?.trim(),
+      eventStatus: request.type === 'event' ? 'proposed' : undefined,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      version: 0
     };
 
-    setDoc(doc(db, POSTS_COLLECTION, post.id), sanitize(post)).catch(err => {
-      console.error('[PostService] createPost failed', err);
-    });
+    void (async () => {
+      const batch = writeBatch(db);
+      batch.set(doc(db, POSTS_COLLECTION, post.id), sanitize(post));
+      const logId = generateId();
+      batch.set(doc(db, TRANSACTIONS_COLLECTION, logId), sanitize({
+        id: logId,
+        type: 'POST_CREATE',
+        outcome: 'COMMITTED',
+        actorId: user.id,
+        actorName: user.name,
+        message: `Created ${post.type} post ${post.id}`,
+        entities: [{ collection: POSTS_COLLECTION, docId: post.id }],
+        createdAt: now
+      }));
+      try {
+        await batch.commit();
+      } catch (err) {
+        console.error('[PostService] createPost failed', err);
+      }
+    })();
 
     return { success: true, post };
   }
@@ -117,7 +151,11 @@ export class PostService {
     const db = getDb();
     if (!db) return { success: false, error: 'Offline' };
 
-    const patch = { ...updates, updatedAt: new Date().toISOString() };
+    const patch = {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+      version: (post.version ?? 0) + 1
+    };
     updateDoc(doc(db, POSTS_COLLECTION, postId), sanitize(patch)).catch(err => {
       console.error('[PostService] updatePost failed', err);
     });
@@ -125,6 +163,16 @@ export class PostService {
     return { success: true };
   }
 
+  /**
+   * Atomic post deletion.
+   *
+   * The post, its comments, and any related reservations all live in
+   * separate top-level collections in Firestore. To guarantee no orphans,
+   * we read the related docs and queue every delete into a single
+   * writeBatch. writeBatch is atomic - all deletes commit or none do.
+   * We piggyback the audit log row inside the same batch so the audit
+   * trail is also rolled back on failure.
+   */
   deletePost(postId: string): { success: boolean; error?: string } {
     const user = this.authService.currentUser();
     if (!user) return { success: false, error: 'Not logged in' };
@@ -141,16 +189,51 @@ export class PostService {
 
     void (async () => {
       try {
-        await deleteDoc(doc(db, POSTS_COLLECTION, postId));
-        const commentsQ = query(collection(db, COMMENTS_COLLECTION), where('postId', '==', postId));
-        const commentDocs = await getDocs(commentsQ);
-        if (!commentDocs.empty) {
-          const batch = writeBatch(db);
-          commentDocs.forEach(d => batch.delete(d.ref));
-          await batch.commit();
-        }
+        const [commentDocs, reservationDocs] = await Promise.all([
+          getDocs(query(collection(db, COMMENTS_COLLECTION), where('postId', '==', postId))),
+          getDocs(query(collection(db, RESERVATIONS_COLLECTION), where('postId', '==', postId)))
+        ]);
+
+        const batch = writeBatch(db);
+        batch.delete(doc(db, POSTS_COLLECTION, postId));
+        commentDocs.forEach(d => batch.delete(d.ref));
+        reservationDocs.forEach(d => batch.delete(d.ref));
+
+        const logId = generateId();
+        batch.set(doc(db, TRANSACTIONS_COLLECTION, logId), sanitize({
+          id: logId,
+          type: 'POST_DELETE',
+          outcome: 'COMMITTED',
+          actorId: user.id,
+          actorName: user.name,
+          message: `Deleted post ${postId} and ${commentDocs.size} comment(s) + ${reservationDocs.size} reservation(s)`,
+          entities: [
+            { collection: POSTS_COLLECTION, docId: postId },
+            ...commentDocs.docs.map(d => ({ collection: COMMENTS_COLLECTION, docId: d.id })),
+            ...reservationDocs.docs.map(d => ({ collection: RESERVATIONS_COLLECTION, docId: d.id }))
+          ],
+          createdAt: new Date().toISOString()
+        }));
+
+        await batch.commit();
       } catch (err) {
         console.error('[PostService] deletePost failed', err);
+        try {
+          const logId = generateId();
+          await setDoc(doc(db, TRANSACTIONS_COLLECTION, logId), sanitize({
+            id: logId,
+            type: 'POST_DELETE',
+            outcome: 'ROLLED_BACK',
+            actorId: user.id,
+            actorName: user.name,
+            message: `Delete failed for post ${postId}`,
+            entities: [{ collection: POSTS_COLLECTION, docId: postId }],
+            errorReason: err instanceof Error ? err.message : 'unknown',
+            createdAt: new Date().toISOString()
+          }));
+        } catch {
+          /* swallow */
+        }
       }
     })();
 
@@ -158,11 +241,72 @@ export class PostService {
   }
 
   resolvePost(postId: string): { success: boolean; error?: string } {
-    return this.updatePost(postId, { resolved: true });
+    const result = this.updatePost(postId, { resolved: true });
+    if (result.success) this.logResolution(postId, true);
+    return result;
   }
 
   unresolvePost(postId: string): { success: boolean; error?: string } {
-    return this.updatePost(postId, { resolved: false });
+    const result = this.updatePost(postId, { resolved: false });
+    if (result.success) this.logResolution(postId, false);
+    return result;
+  }
+
+  private logResolution(postId: string, resolved: boolean): void {
+    const db = getDb();
+    const user = this.authService.currentUser();
+    if (!db || !user) return;
+    const logId = generateId();
+    setDoc(doc(db, TRANSACTIONS_COLLECTION, logId), sanitize({
+      id: logId,
+      type: 'POST_RESOLVE',
+      outcome: 'COMMITTED',
+      actorId: user.id,
+      actorName: user.name,
+      message: `${resolved ? 'Resolved' : 'Reopened'} post ${postId}`,
+      entities: [{ collection: POSTS_COLLECTION, docId: postId }],
+      createdAt: new Date().toISOString()
+    })).catch(err => console.error('[PostService] log resolve failed', err));
+  }
+
+  /**
+   * Admin-only event moderation. Updates eventStatus and stamps who/when
+   * decided so the audit log reflects which admin approved or rejected
+   * each proposed event.
+   */
+  decideEvent(postId: string, decision: 'approved' | 'rejected'): { success: boolean; error?: string } {
+    const user = this.authService.currentUser();
+    if (!user) return { success: false, error: 'Not logged in' };
+    if (user.role !== 'admin') return { success: false, error: 'Admins only' };
+
+    const post = this.postsSignal().find(p => p.id === postId);
+    if (!post) return { success: false, error: 'Post not found' };
+    if (post.type !== 'event') return { success: false, error: 'Not an event post' };
+
+    const now = new Date().toISOString();
+    const result = this.updatePost(postId, {
+      eventStatus: decision,
+      eventDecidedBy: user.name,
+      eventDecidedAt: now
+    });
+
+    if (result.success) {
+      const db = getDb();
+      if (db) {
+        const logId = generateId();
+        setDoc(doc(db, TRANSACTIONS_COLLECTION, logId), sanitize({
+          id: logId,
+          type: decision === 'approved' ? 'EVENT_APPROVE' : 'EVENT_REJECT',
+          outcome: 'COMMITTED',
+          actorId: user.id,
+          actorName: user.name,
+          message: `${decision === 'approved' ? 'Approved' : 'Rejected'} event "${post.eventName ?? post.id}"`,
+          entities: [{ collection: POSTS_COLLECTION, docId: postId }],
+          createdAt: now
+        })).catch(err => console.error('[PostService] log event decision failed', err));
+      }
+    }
+    return result;
   }
 }
 

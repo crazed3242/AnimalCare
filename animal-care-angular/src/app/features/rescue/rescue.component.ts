@@ -1,5 +1,5 @@
 import { Component, inject, signal, computed } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { PostService } from '../../core/services/post.service';
 import { CommentService } from '../../core/services/comment.service';
 import { MessageService } from '../../core/services/message.service';
@@ -10,7 +10,7 @@ import { Post } from '../../core/models/post.model';
 @Component({
   selector: 'app-rescue',
   standalone: true,
-  imports: [PostCardComponent, NavbarComponent, RouterLink],
+  imports: [PostCardComponent, NavbarComponent],
   template: `
     <app-navbar />
 
@@ -20,7 +20,6 @@ import { Post } from '../../core/models/post.model';
           <h1>Rescue Animals</h1>
           <p>Report animals in need of urgent help</p>
         </div>
-        <a routerLink="/create-post/rescue" class="btn btn-primary">Report Rescue</a>
       </div>
 
       <div class="category-filters">
