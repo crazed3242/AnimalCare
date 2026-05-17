@@ -9,7 +9,12 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import type { Unsubscribe } from 'firebase/firestore';
-import { Message, Conversation } from '../models/message.model';
+import {
+  Conversation,
+  Message,
+  MessageAttachment,
+  formatMessagePreview
+} from '../models/message.model';
 import { AuthService } from './auth.service';
 import { getDb } from '../firebase/firebase';
 
@@ -72,7 +77,7 @@ export class MessageService {
           otherUserId,
           otherUserName: isSender ? msg.receiverName : msg.senderName,
           otherUserAvatarUrl: isSender ? msg.receiverAvatarUrl : msg.senderAvatarUrl,
-          lastMessage: msg.content,
+          lastMessage: formatMessagePreview(msg),
           lastMessageTime: msg.createdAt,
           unreadCount: isSender ? 0 : (msg.read ? 0 : 1),
           postId: msg.postId,
@@ -107,10 +112,21 @@ export class MessageService {
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   }
 
-  sendMessage(receiverId: string, content: string, postId?: string, postTitle?: string): { success: boolean; error?: string } {
+  sendMessage(
+    receiverId: string,
+    content: string,
+    postId?: string,
+    postTitle?: string,
+    attachments?: MessageAttachment[]
+  ): { success: boolean; error?: string } {
     const user = this.authService.currentUser();
     if (!user) return { success: false, error: 'Not logged in' };
-    if (!content.trim()) return { success: false, error: 'Message cannot be empty' };
+
+    const trimmed = content.trim();
+    const media = attachments?.length ? attachments : undefined;
+    if (!trimmed && !media?.length) {
+      return { success: false, error: 'Message cannot be empty' };
+    }
 
     const receiverProfile = this.authService.getUserProfile(receiverId);
     if (!receiverProfile) return { success: false, error: 'Receiver not found' };
@@ -126,7 +142,8 @@ export class MessageService {
       receiverId,
       receiverName: receiverProfile.name,
       receiverAvatarUrl: receiverProfile.avatarUrl,
-      content: content.trim(),
+      content: trimmed,
+      attachments: media,
       postId,
       postTitle,
       createdAt: new Date().toISOString(),

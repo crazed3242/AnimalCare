@@ -7,6 +7,8 @@ import { AuthService } from '../../core/services/auth.service';
 import { PostCardComponent } from '../../shared/post-card/post-card.component';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
 import { Post, PostType } from '../../core/models/post.model';
+import { navigateToMessageFromPost } from '../../core/utils/message-navigation';
+import { isPostVisibleToViewer } from '../../core/utils/post-visibility';
 
 @Component({
   selector: 'app-feed',
@@ -233,7 +235,9 @@ export class FeedComponent {
   searchQuery = signal('');
 
   filteredPosts = computed(() => {
-    const posts = this.postService.posts();
+    const me = this.authService.currentUser();
+    const viewer = { viewerId: me?.id, isAdmin: this.authService.isAdmin() };
+    const posts = this.postService.posts().filter(p => isPostVisibleToViewer(p, viewer));
     const f = this.filter();
     const q = this.searchQuery().trim().toLowerCase();
     const typeFiltered = f === 'all' ? posts : posts.filter(p => p.type === f);
@@ -280,7 +284,7 @@ export class FeedComponent {
   }
 
   onMessage(post: Post): void {
-    this.router.navigate(['/messages', post.userId]);
+    navigateToMessageFromPost(this.router, post);
   }
 
   onDeleteComment(commentId: string): void {

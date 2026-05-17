@@ -6,6 +6,7 @@ import { MessageService } from '../../core/services/message.service';
 import { PostCardComponent } from '../../shared/post-card/post-card.component';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
 import { Post } from '../../core/models/post.model';
+import { navigateToMessageFromPost } from '../../core/utils/message-navigation';
 
 @Component({
   selector: 'app-adoption',
@@ -18,7 +19,7 @@ import { Post } from '../../core/models/post.model';
       <div class="category-header">
         <div class="category-info">
           <h1>Pets for Adoption</h1>
-          <p>Find your perfect companion</p>
+          <p>Find your perfect companion. Use <strong>Submit adoption request</strong> to apply; <strong>Message</strong> is for questions only.</p>
         </div>
       </div>
 
@@ -123,7 +124,7 @@ export class AdoptionComponent {
   }
 
   onMessage(post: Post): void {
-    this.router.navigate(['/messages', post.userId]);
+    navigateToMessageFromPost(this.router, post);
   }
 
   onDeleteComment(commentId: string): void {

@@ -5,7 +5,8 @@ import { AuthService } from '../../core/services/auth.service';
 import { PostService } from '../../core/services/post.service';
 import { CommentService } from '../../core/services/comment.service';
 import { TransactionService } from '../../core/services/transaction.service';
-import { Post, PostType } from '../../core/models/post.model';
+import { Post, PostType, ReservationStatus, getPostImageUrls } from '../../core/models/post.model';
+import { Reservation } from '../../core/models/reservation.model';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 
@@ -35,7 +36,10 @@ import { RouterLink } from '@angular/router';
             Users
           </button>
           <button class="admin-nav-btn" [class.active]="activeTab() === 'reservations'" (click)="activeTab.set('reservations')">
-            Reservations
+            Adoption
+            @if (pendingAdoptionRequestCount() > 0) {
+              <span class="nav-badge">{{ pendingAdoptionRequestCount() }}</span>
+            }
           </button>
           <button class="admin-nav-btn" [class.active]="activeTab() === 'events'" (click)="activeTab.set('events')">
             Events
@@ -116,6 +120,35 @@ import { RouterLink } from '@angular/router';
         @if (activeTab() === 'posts') {
           <div class="posts-section">
             <h1>All Posts</h1>
+            <div class="admin-posts-toolbar">
+              <div class="admin-search-bar">
+                <label class="sr-only" for="admin-post-search">Search posts</label>
+                <input
+                  id="admin-post-search"
+                  class="input-field admin-search-input"
+                  type="search"
+                  placeholder="Search by description, location, author, breed, event name, or post ID..."
+                  [value]="postSearchQuery()"
+                  (input)="onPostSearchInput($event)"
+                  autocomplete="off"
+                />
+                @if (postSearchQuery()) {
+                  <button
+                    type="button"
+                    class="btn btn-outline btn-sm admin-search-clear"
+                    (click)="clearPostSearch()"
+                    aria-label="Clear search"
+                  >
+                    Clear
+                  </button>
+                }
+              </div>
+              @if (postSearchQuery() || postFilter() !== 'all') {
+                <p class="admin-posts-result-count" aria-live="polite">
+                  Showing {{ filteredAdminPosts().length }} of {{ postService.posts().length }} posts
+                </p>
+              }
+            </div>
             <div class="admin-filters">
               <button class="btn btn-sm" [class.btn-primary]="postFilter() === 'all'" [class.btn-outline]="postFilter() !== 'all'" (click)="postFilter.set('all')">All</button>
               <button class="btn btn-sm" [class.btn-primary]="postFilter() === 'lost'" [class.btn-outline]="postFilter() !== 'lost'" (click)="postFilter.set('lost')">Lost</button>
@@ -128,9 +161,12 @@ import { RouterLink } from '@angular/router';
               @for (post of filteredAdminPosts(); track post.id) {
                 <div class="admin-event-card card">
                   <div class="admin-post-item admin-event-summary-row">
-                    @if (post.imageUrl) {
+                    @if (postImages(post).length) {
                       <div class="admin-post-image">
-                        <img [src]="post.imageUrl" [alt]="post.description" />
+                        <img [src]="postImages(post)[0]" [alt]="post.description" />
+                        @if (postImages(post).length > 1) {
+                          <span class="admin-image-count">+{{ postImages(post).length - 1 }}</span>
+                        }
                       </div>
                     }
                     <div class="admin-post-content">
@@ -284,19 +320,29 @@ import { RouterLink } from '@angular/router';
                         <span class="event-detail-label">Full description</span>
                         <p class="event-description-text">{{ post.description }}</p>
                       </div>
-                      @if (post.imageUrl) {
+                      @if (postImages(post).length) {
                         <div class="event-image-preview">
-                          <span class="event-detail-label">Attached image</span>
-                          <a [href]="post.imageUrl" target="_blank" rel="noopener noreferrer" class="event-image-link">
-                            <img [src]="post.imageUrl" [alt]="post.description" />
-                          </a>
+                          <span class="event-detail-label">Attached images ({{ postImages(post).length }})</span>
+                          <div class="event-image-gallery">
+                            @for (url of postImages(post); track url) {
+                              <a [href]="url" target="_blank" rel="noopener noreferrer" class="event-image-link">
+                                <img [src]="url" [alt]="post.description" />
+                              </a>
+                            }
+                          </div>
                         </div>
                       }
                     </div>
                   </details>
                 </div>
               } @empty {
-                <p class="no-data">No posts found</p>
+                <p class="no-data">
+                  @if (postSearchQuery() || postFilter() !== 'all') {
+                    No posts match your search or filter. Try different keywords or clear the filters.
+                  } @else {
+                    No posts yet
+                  }
+                </p>
               }
             </div>
           </div>
@@ -379,7 +425,7 @@ import { RouterLink } from '@angular/router';
                           <span class="event-detail-value">{{ userCommentCount(user.id) }}</span>
                         </div>
                         <div class="event-detail-item">
-                          <span class="event-detail-label">Reservations made</span>
+                          <span class="event-detail-label">Adoption requests sent</span>
                           <span class="event-detail-value">{{ userReservationCount(user.id) }}</span>
                         </div>
                         <div class="event-detail-item event-detail-wide">
@@ -425,8 +471,54 @@ import { RouterLink } from '@angular/router';
 
         @if (activeTab() === 'reservations') {
           <div class="reservations-section">
-            <h1>Adoption Reservations</h1>
-            <p class="section-hint">Each row corresponds to a Firestore <code>runTransaction()</code> call. Status changes are atomic with the linked post update.</p>
+            <h1>Adoption</h1>
+            <p class="section-hint">
+              <strong>Listings</strong> are adoption posts in the feed.
+              <strong>Requests</strong> are created when someone clicks “Submit adoption request” on a listing (not when they only send a Message).
+              Listing owners approve or reject on their post; you can oversee or decide here if needed.
+            </p>
+
+            <h2 class="adoption-subheading">Adoption listings ({{ adoptionListings().length }})</h2>
+            <div class="admin-filters">
+              <button class="btn btn-sm" [class.btn-primary]="adoptionListingFilter() === 'all'" [class.btn-outline]="adoptionListingFilter() !== 'all'" (click)="adoptionListingFilter.set('all')">All</button>
+              <button class="btn btn-sm" [class.btn-primary]="adoptionListingFilter() === 'available'" [class.btn-outline]="adoptionListingFilter() !== 'available'" (click)="adoptionListingFilter.set('available')">Available</button>
+              <button class="btn btn-sm" [class.btn-primary]="adoptionListingFilter() === 'reserved'" [class.btn-outline]="adoptionListingFilter() !== 'reserved'" (click)="adoptionListingFilter.set('reserved')">Request pending</button>
+              <button class="btn btn-sm" [class.btn-primary]="adoptionListingFilter() === 'adopted'" [class.btn-outline]="adoptionListingFilter() !== 'adopted'" (click)="adoptionListingFilter.set('adopted')">Adopted</button>
+            </div>
+            <div class="admin-adoption-listings">
+              @for (post of filteredAdoptionListings(); track post.id) {
+                <div class="admin-adoption-listing card">
+                  @if (postImages(post).length) {
+                    <div class="admin-post-image admin-adoption-thumb">
+                      <img [src]="postImages(post)[0]" [alt]="post.description" />
+                    </div>
+                  }
+                  <div class="admin-adoption-listing-body">
+                    <div class="admin-post-header">
+                      <span class="badge badge-adoption">adoption</span>
+                      <span class="badge badge-listing-{{ adoptionListingStatus(post) }}">{{ adoptionListingStatusLabel(post) }}</span>
+                      @if (post.resolved) {
+                        <span class="badge badge-resolved">Closed</span>
+                      }
+                    </div>
+                    <p class="admin-post-desc">{{ post.description }}</p>
+                    <div class="admin-post-meta">
+                      <span>{{ post.breed || '—' }} · {{ post.age || '—' }}</span>
+                      <span>{{ post.location }}</span>
+                      <span>by {{ post.userName }}</span>
+                      <span>{{ post.createdAt | date:'short' }}</span>
+                    </div>
+                    @if (pendingRequestsForPost(post.id).length > 0) {
+                      <span class="listing-request-count">{{ pendingRequestsForPost(post.id).length }} pending request(s)</span>
+                    }
+                  </div>
+                </div>
+              } @empty {
+                <p class="no-data">No adoption listings yet. Users create them via Post for Adoption.</p>
+              }
+            </div>
+
+            <h2 class="adoption-subheading">Adoption requests ({{ transactionService.reservations().length }})</h2>
             <div class="admin-filters">
               <button class="btn btn-sm" [class.btn-primary]="reservationFilter() === 'all'" [class.btn-outline]="reservationFilter() !== 'all'" (click)="reservationFilter.set('all')">All</button>
               <button class="btn btn-sm" [class.btn-primary]="reservationFilter() === 'pending'" [class.btn-outline]="reservationFilter() !== 'pending'" (click)="reservationFilter.set('pending')">Pending</button>
@@ -443,16 +535,22 @@ import { RouterLink } from '@angular/router';
                   <div class="reservation-body">
                     <div class="reservation-line">
                       <strong>{{ r.requesterName }}</strong>
-                      <span class="muted">→</span>
+                      <span class="muted">wants to adopt from</span>
                       <strong>{{ r.postOwnerName }}</strong>
                     </div>
                     <p class="reservation-msg">"{{ r.message }}"</p>
-                    <span class="reservation-meta">Post: {{ r.postDescription }}</span>
-                    <span class="reservation-meta">Created {{ r.createdAt | date:'short' }}@if (r.decidedAt) { <span> · Decided {{ r.decidedAt | date:'short' }}</span> }</span>
+                    <span class="reservation-meta">Listing: {{ r.postDescription }}</span>
+                    <span class="reservation-meta">Submitted {{ r.createdAt | date:'short' }}@if (r.decidedAt) { <span> · Decided {{ r.decidedAt | date:'short' }}</span> }</span>
                   </div>
+                  @if (r.status === 'pending') {
+                    <div class="reservation-admin-actions">
+                      <button type="button" class="btn btn-secondary btn-sm" (click)="approveAdoptionRequest(r.id)">Approve</button>
+                      <button type="button" class="btn btn-outline btn-sm" (click)="rejectAdoptionRequest(r.id)">Reject</button>
+                    </div>
+                  }
                 </div>
               } @empty {
-                <p class="no-data">No reservations match this filter</p>
+                <p class="no-data">No formal adoption requests yet. They appear when someone uses “Submit adoption request” on a listing—not from Message chats alone.</p>
               }
             </div>
           </div>
@@ -472,9 +570,12 @@ import { RouterLink } from '@angular/router';
               @for (post of filteredEvents(); track post.id) {
                 <div class="admin-event-card card">
                   <div class="admin-post-item admin-event-summary-row">
-                    @if (post.imageUrl) {
+                    @if (postImages(post).length) {
                       <div class="admin-post-image">
-                        <img [src]="post.imageUrl" [alt]="post.eventName || post.description" />
+                        <img [src]="postImages(post)[0]" [alt]="post.eventName || post.description" />
+                        @if (postImages(post).length > 1) {
+                          <span class="admin-image-count">+{{ postImages(post).length - 1 }}</span>
+                        }
                       </div>
                     }
                     <div class="admin-post-content">
@@ -572,12 +673,16 @@ import { RouterLink } from '@angular/router';
                         <span class="event-detail-label">Full description</span>
                         <p class="event-description-text">{{ post.description }}</p>
                       </div>
-                      @if (post.imageUrl) {
+                      @if (postImages(post).length) {
                         <div class="event-image-preview">
-                          <span class="event-detail-label">Attached image</span>
-                          <a [href]="post.imageUrl" target="_blank" rel="noopener noreferrer" class="event-image-link">
-                            <img [src]="post.imageUrl" [alt]="post.eventName || 'Event image'" />
-                          </a>
+                          <span class="event-detail-label">Attached images ({{ postImages(post).length }})</span>
+                          <div class="event-image-gallery">
+                            @for (url of postImages(post); track url) {
+                              <a [href]="url" target="_blank" rel="noopener noreferrer" class="event-image-link">
+                                <img [src]="url" [alt]="post.eventName || 'Event image'" />
+                              </a>
+                            }
+                          </div>
                         </div>
                       }
                     </div>
@@ -593,10 +698,6 @@ import { RouterLink } from '@angular/router';
         @if (activeTab() === 'transactions') {
           <div class="transactions-section">
             <h1>Transaction Log</h1>
-            <p class="section-hint">
-              Durable, append-only audit trail. Every <strong>runTransaction()</strong> and <strong>writeBatch()</strong> the app performs writes
-              one row here, including <em>rolled-back</em> attempts. Once committed these rows cannot be modified or deleted (see <code>firestore.rules</code>).
-            </p>
             <div class="tx-stats">
               <div class="tx-stat-card card">
                 <div class="tx-stat-value">{{ committedCount() }}</div>
@@ -810,8 +911,53 @@ import { RouterLink } from '@angular/router';
       flex-shrink: 0;
     }
 
+    .admin-posts-toolbar {
+      margin-bottom: 1rem;
+    }
+
+    .admin-search-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      background: white;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 0.5rem;
+    }
+
+    .admin-search-input {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+    }
+
+    .admin-search-clear {
+      flex-shrink: 0;
+    }
+
+    .admin-posts-result-count {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin: 0 0 0.25rem;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
     .admin-filters {
       display: flex;
+      flex-wrap: wrap;
       gap: 0.375rem;
       margin-bottom: 1.25rem;
     }
@@ -830,6 +976,7 @@ import { RouterLink } from '@angular/router';
     }
 
     .admin-post-image {
+      position: relative;
       width: 80px;
       height: 80px;
       border-radius: var(--radius);
@@ -841,6 +988,18 @@ import { RouterLink } from '@angular/router';
       width: 100%;
       height: 100%;
       object-fit: cover;
+    }
+
+    .admin-image-count {
+      position: absolute;
+      bottom: 0.25rem;
+      right: 0.25rem;
+      background: rgba(0, 0, 0, 0.65);
+      color: #fff;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      padding: 0.125rem 0.375rem;
+      border-radius: var(--radius);
     }
 
     .admin-post-content {
@@ -1013,12 +1172,61 @@ import { RouterLink } from '@angular/router';
       gap: 0.5rem;
     }
 
+    .adoption-subheading {
+      font-size: 1.125rem;
+      font-weight: 800;
+      margin: 1.5rem 0 0.75rem;
+    }
+
+    .admin-adoption-listings {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .admin-adoption-listing {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 0.875rem 1rem;
+    }
+
+    .admin-adoption-thumb {
+      width: 72px;
+      height: 72px;
+    }
+
+    .admin-adoption-listing-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .badge-listing-available { background: rgba(16, 185, 129, 0.15); color: #047857; }
+    .badge-listing-reserved { background: rgba(245, 158, 11, 0.15); color: #b45309; }
+    .badge-listing-adopted { background: rgba(99, 102, 241, 0.15); color: #4338ca; }
+
+    .listing-request-count {
+      display: inline-block;
+      margin-top: 0.375rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--primary-dark);
+    }
+
     .admin-reservation-item {
       display: grid;
-      grid-template-columns: 110px 1fr;
+      grid-template-columns: 110px 1fr auto;
       gap: 1rem;
       padding: 0.875rem 1rem;
       align-items: start;
+    }
+
+    .reservation-admin-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+      flex-shrink: 0;
     }
 
     .reservation-body {
@@ -1208,6 +1416,19 @@ import { RouterLink } from '@angular/router';
       display: inline-block;
     }
 
+    .event-image-gallery {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.375rem;
+    }
+
+    .event-image-gallery .event-image-link img {
+      width: 120px;
+      height: 120px;
+      object-fit: cover;
+    }
+
     .user-type-breakdown {
       display: flex;
       flex-wrap: wrap;
@@ -1377,7 +1598,9 @@ export class AdminComponent {
 
   activeTab = signal<'overview' | 'posts' | 'comments' | 'users' | 'reservations' | 'events' | 'transactions'>('overview');
   postFilter = signal<string>('all');
+  postSearchQuery = signal('');
   reservationFilter = signal<string>('all');
+  adoptionListingFilter = signal<'all' | ReservationStatus>('all');
   txOutcomeFilter = signal<'all' | 'COMMITTED' | 'ROLLED_BACK'>('all');
   eventFilter = signal<'all' | 'proposed' | 'approved' | 'rejected'>('proposed');
 
@@ -1402,8 +1625,13 @@ export class AdminComponent {
 
   filteredAdminPosts = computed(() => {
     const f = this.postFilter();
-    const posts = f === 'all' ? this.postService.posts() : this.postService.posts().filter(p => p.type === f);
-    return [...posts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const q = this.postSearchQuery().trim().toLowerCase();
+    const typeFiltered =
+      f === 'all' ? this.postService.posts() : this.postService.posts().filter(p => p.type === f);
+    const searchFiltered = q
+      ? typeFiltered.filter(p => this.postMatchesSearch(p, q))
+      : typeFiltered;
+    return [...searchFiltered].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   });
 
   allComments = computed(() =>
@@ -1419,6 +1647,23 @@ export class AdminComponent {
     const filtered = f === 'all' ? events : events.filter(p => p.eventStatus === f);
     return [...filtered].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   });
+
+  adoptionListings = computed(() =>
+    [...this.postService.posts()]
+      .filter(p => p.type === 'adoption')
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  );
+
+  filteredAdoptionListings = computed(() => {
+    const f = this.adoptionListingFilter();
+    const posts = this.adoptionListings();
+    if (f === 'all') return posts;
+    return posts.filter(p => this.adoptionListingStatus(p) === f);
+  });
+
+  pendingAdoptionRequestCount = computed(() =>
+    this.transactionService.reservations().filter(r => r.status === 'pending').length
+  );
 
   filteredReservations = computed(() => {
     const f = this.reservationFilter();
@@ -1453,6 +1698,45 @@ export class AdminComponent {
 
   formatEventCategory(value: string): string {
     return value.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+
+  onPostSearchInput(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.postSearchQuery.set(target?.value ?? '');
+  }
+
+  clearPostSearch(): void {
+    this.postSearchQuery.set('');
+  }
+
+  private postMatchesSearch(post: Post, query: string): boolean {
+    const text = [
+      post.id,
+      post.type,
+      post.description,
+      post.location,
+      post.userName,
+      post.contactInfo,
+      post.breed,
+      post.age,
+      post.healthCondition,
+      post.adoptionRequirements,
+      post.eventName,
+      post.organizerName,
+      post.eventCategory ? this.formatEventCategory(post.eventCategory) : '',
+      post.urgencyLevel,
+      post.reservationStatus,
+      post.eventStatus,
+      post.resolved ? 'resolved' : 'active'
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return text.includes(query);
+  }
+
+  postImages(post: Post): string[] {
+    return getPostImageUrls(post);
   }
 
   userCommentCount(userId: string): number {
@@ -1514,6 +1798,33 @@ export class AdminComponent {
     if (confirm('Reject this event proposal? It will be hidden from non-admin users.')) {
       this.postService.decideEvent(postId, 'rejected');
     }
+  }
+
+  adoptionListingStatus(post: Post): ReservationStatus {
+    return post.reservationStatus ?? 'available';
+  }
+
+  adoptionListingStatusLabel(post: Post): string {
+    const status = this.adoptionListingStatus(post);
+    if (status === 'reserved') return 'Request pending';
+    if (status === 'adopted') return 'Adopted';
+    return 'Available';
+  }
+
+  pendingRequestsForPost(postId: string): Reservation[] {
+    return this.transactionService.getReservationsForPost(postId).filter(r => r.status === 'pending');
+  }
+
+  async approveAdoptionRequest(reservationId: string): Promise<void> {
+    if (!confirm('Approve this adoption request? The listing will be marked as adopted.')) return;
+    const result = await this.transactionService.approveReservation(reservationId);
+    if (!result.success) alert(result.error || 'Could not approve request.');
+  }
+
+  async rejectAdoptionRequest(reservationId: string): Promise<void> {
+    if (!confirm('Reject this adoption request? The listing will be available again.')) return;
+    const result = await this.transactionService.rejectReservation(reservationId);
+    if (!result.success) alert(result.error || 'Could not reject request.');
   }
 
   logout(): void {

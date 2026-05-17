@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
@@ -16,8 +16,8 @@ import { AuthService } from '../../../core/services/auth.service';
           <p>Join the AnimalCare community</p>
         </div>
 
-        @if (error) {
-          <div class="auth-error">{{ error }}</div>
+        @if (error()) {
+          <div class="auth-error" role="alert">{{ error() }}</div>
         }
 
         <form class="auth-form" (ngSubmit)="onSubmit()">
@@ -41,8 +41,8 @@ import { AuthService } from '../../../core/services/auth.service';
             <input id="confirmPassword" type="password" class="input-field" [(ngModel)]="confirmPassword" name="confirmPassword" placeholder="Confirm your password" required />
           </div>
 
-          <button type="submit" class="btn btn-primary btn-lg btn-block" [disabled]="loading">
-            @if (loading) {
+          <button type="submit" class="btn btn-primary btn-lg btn-block" [disabled]="loading()">
+            @if (loading()) {
               Creating account...
             } @else {
               Create Account
@@ -150,16 +150,16 @@ export class RegisterComponent {
   email = '';
   password = '';
   confirmPassword = '';
-  error = '';
-  loading = false;
+  readonly error = signal('');
+  readonly loading = signal(false);
 
   async onSubmit(): Promise<void> {
-    this.error = '';
-    this.loading = true;
+    this.error.set('');
+    this.loading.set(true);
 
     if (this.password !== this.confirmPassword) {
-      this.error = 'Passwords do not match';
-      this.loading = false;
+      this.error.set('Passwords do not match');
+      this.loading.set(false);
       return;
     }
 
@@ -168,10 +168,12 @@ export class RegisterComponent {
       if (result.success) {
         this.router.navigate(['/feed']);
       } else {
-        this.error = result.error || 'Registration failed';
+        this.error.set(result.error?.trim() || 'Registration failed');
       }
+    } catch (e) {
+      this.error.set(e instanceof Error ? e.message : 'Registration failed. Please try again.');
     } finally {
-      this.loading = false;
+      this.loading.set(false);
     }
   }
 }

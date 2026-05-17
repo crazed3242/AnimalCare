@@ -90,7 +90,7 @@ export class PostService {
       userId: user.id,
       userName: user.name,
       userAvatarUrl: user.avatarUrl,
-      imageUrl: request.imageUrl,
+      imageUrls: request.imageUrls?.length ? request.imageUrls : undefined,
       description: request.description.trim(),
       location: request.location.trim(),
       date: request.date,

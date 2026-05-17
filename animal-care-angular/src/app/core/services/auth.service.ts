@@ -24,9 +24,14 @@ const EMAIL_INDEX_COLLECTION = 'user_emails';
 const TRANSACTIONS_COLLECTION = 'transactions';
 const CURRENT_USER_KEY = 'animal_care_current_user';
 const FIRESTORE_TIMEOUT_MS = 12000;
+const DUPLICATE_EMAIL_MSG = 'This email is already registered.';
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 function emailKey(email: string): string {
-  return email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  return normalizeEmail(email).replace(/[^a-z0-9]/g, '_');
 }
 
 async function appendAuthLog(
@@ -141,9 +146,10 @@ export class AuthService {
     if (!db) return { success: false, error: 'Offline' };
 
     try {
+      const normalizedEmail = normalizeEmail(email);
       const q = query(
         collection(db, USERS_COLLECTION),
-        where('email', '==', email),
+        where('email', '==', normalizedEmail),
         where('password', '==', password)
       );
       const snapshot = await withTimeout(getDocs(q), FIRESTORE_TIMEOUT_MS);
@@ -186,11 +192,11 @@ export class AuthService {
     if (password.length < 6) {
       return { success: false, error: 'Password must be at least 6 characters' };
     }
-    if (email.trim().toLowerCase() === ADMIN_EMAIL) {
+    if (normalizeEmail(email) === ADMIN_EMAIL) {
       return { success: false, error: 'This email is reserved' };
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
     const newUser: User = {
       id: generateId(),
       email: normalizedEmail,
@@ -204,12 +210,32 @@ export class AuthService {
     const userRef = doc(db, USERS_COLLECTION, newUser.id);
     const emailRef = doc(db, EMAIL_INDEX_COLLECTION, emailKey(normalizedEmail));
 
+    // Fast path: duplicates must be detected by email even if `user_emails` is missing (legacy data).
+    if (this.usersSignal().some(u => normalizeEmail(u.email) === normalizedEmail)) {
+      return { success: false, error: DUPLICATE_EMAIL_MSG };
+    }
+
+    try {
+      const [claimedSnap, usersSnap] = await withTimeout(
+        Promise.all([
+          getDoc(emailRef),
+          getDocs(query(collection(db, USERS_COLLECTION), where('email', '==', normalizedEmail)))
+        ]),
+        FIRESTORE_TIMEOUT_MS
+      );
+      if (claimedSnap.exists() || !usersSnap.empty) {
+        return { success: false, error: DUPLICATE_EMAIL_MSG };
+      }
+    } catch {
+      // Offline / timeout: fall through; transaction still enforces sentinel uniqueness.
+    }
+
     try {
       await withTimeout(
         runTransaction(db, async tx => {
           const taken = await tx.get(emailRef);
           if (taken.exists()) {
-            throw new Error('Email already registered');
+            throw new Error(DUPLICATE_EMAIL_MSG);
           }
           tx.set(emailRef, { email: normalizedEmail, userId: newUser.id, createdAt: newUser.createdAt });
           tx.set(userRef, newUser);
@@ -220,7 +246,7 @@ export class AuthService {
       this.currentUserSignal.set(newUser);
       storageSet(CURRENT_USER_KEY, JSON.stringify(newUser));
 
-      await appendAuthLog(db, {
+      void appendAuthLog(db, {
         type: 'USER_REGISTER',
         outcome: 'COMMITTED',
         actorId: newUser.id,
@@ -235,7 +261,7 @@ export class AuthService {
       return { success: true };
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'Registration failed.';
-      await appendAuthLog(db, {
+      void appendAuthLog(db, {
         type: 'USER_REGISTER',
         outcome: 'ROLLED_BACK',
         actorId: newUser.id,

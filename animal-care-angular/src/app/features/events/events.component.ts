@@ -1,5 +1,5 @@
 import { Component, inject, computed, signal } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { PostService } from '../../core/services/post.service';
 import { CommentService } from '../../core/services/comment.service';
 import { MessageService } from '../../core/services/message.service';
@@ -7,23 +7,22 @@ import { AuthService } from '../../core/services/auth.service';
 import { PostCardComponent } from '../../shared/post-card/post-card.component';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
 import { Post, EventStatus } from '../../core/models/post.model';
+import { navigateToMessageFromPost } from '../../core/utils/message-navigation';
+import { isPostVisibleToViewer } from '../../core/utils/post-visibility';
 
 type StatusFilter = 'all' | EventStatus;
 
 @Component({
   selector: 'app-events',
   standalone: true,
-  imports: [PostCardComponent, NavbarComponent, RouterLink],
+  imports: [PostCardComponent, NavbarComponent],
   template: `
     <app-navbar />
 
     <div class="events-page">
       <div class="events-header">
-        <div class="events-info">
-          <h1>Community Events &amp; Programs</h1>
-          <p>Dog shows, pet shows, fundraisers, workshops &mdash; propose your own and the community can join.</p>
-        </div>
-        <a routerLink="/create-post/event" class="btn btn-primary">+ Propose Event</a>
+        <h1>Community Events &amp; Programs</h1>
+        <p>Dog shows, pet shows, fundraisers, workshops &mdash; propose your own and the community can join.</p>
       </div>
 
       <div class="events-controls card">
@@ -53,8 +52,7 @@ type StatusFilter = 'all' | EventStatus;
         } @empty {
           <div class="empty-state">
             <h3>No events to show</h3>
-            <p>Be the first to propose a dog show, pet show, or community program!</p>
-            <a routerLink="/create-post/event" class="btn btn-primary">Propose Event</a>
+            <p>Be the first to propose a dog show, pet show, or community program from the feed.</p>
           </div>
         }
       </div>
@@ -68,12 +66,7 @@ type StatusFilter = 'all' | EventStatus;
     }
 
     .events-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
       margin-bottom: 1rem;
-      flex-wrap: wrap;
-      gap: 1rem;
     }
 
     .events-header h1 {
@@ -129,7 +122,6 @@ type StatusFilter = 'all' | EventStatus;
 
     .empty-state p {
       color: var(--text-muted);
-      margin-bottom: 1.25rem;
     }
   `]
 })
@@ -144,17 +136,12 @@ export class EventsComponent {
 
   filteredPosts = computed(() => {
     const me = this.authService.currentUser();
-    const isAdmin = this.authService.isAdmin();
+    const viewer = { viewerId: me?.id, isAdmin: this.authService.isAdmin() };
     const status = this.statusFilter();
 
     return this.postService.posts()
       .filter(p => p.type === 'event')
-      // Hide rejected events from non-owners and non-admins
-      .filter(p => {
-        if (p.eventStatus !== 'rejected') return true;
-        if (isAdmin) return true;
-        return me?.id === p.userId;
-      })
+      .filter(p => isPostVisibleToViewer(p, viewer))
       .filter(p => status === 'all' ? true : p.eventStatus === status)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   });
@@ -173,7 +160,7 @@ export class EventsComponent {
   }
 
   onMessage(post: Post): void {
-    this.router.navigate(['/messages', post.userId]);
+    navigateToMessageFromPost(this.router, post);
   }
 
   onDeleteComment(commentId: string): void {

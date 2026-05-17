@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AnimalCare — System Presentation Manuscript</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 11pt;
+      line-height: 1.45;
+      color: #1a1a1a;
+      max-width: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    h1 {
+      font-size: 18pt;
+      border-bottom: 2px solid #333;
+      padding-bottom: 0.35em;
+      margin-top: 0;
+    }
+    h2 {
+      font-size: 13pt;
+      margin-top: 1.25em;
+      margin-bottom: 0.4em;
+      color: #222;
+    }
+    h3 {
+      font-size: 11.5pt;
+      margin-top: 1em;
+      margin-bottom: 0.35em;
+    }
+    p, li { margin: 0.4em 0; }
+    ul { margin: 0.35em 0; padding-left: 1.35em; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 0.75em 0;
+      font-size: 10.5pt;
+    }
+    th, td {
+      border: 1px solid #999;
+      padding: 0.4em 0.55em;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f0f0f0; }
+    .meta { color: #444; font-size: 10pt; margin-bottom: 1.5em; }
+    hr {
+      border: none;
+      border-top: 1px solid #ccc;
+      margin: 1.25em 0;
+    }
+    .appendix { page-break-before: always; }
+  </style>
+</head>
+<body>
+
+<h1>AnimalCare — System Presentation Manuscript</h1>
+<p class="meta"><strong>Course context:</strong> IT22 Information Management — PIT (adjust as needed)</p>
+
+<h2>1. Introduction</h2>
+<h3>System title</h3>
+<p><strong>AnimalCare</strong> — Community Lost, Found, Rescue, and Adoption Web Application</p>
+
+<h3>Members and roles</h3>
+<table>
+  <thead><tr><th>Name</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td><em>[Member 1]</em></td><td><em>[e.g., Project lead / database &amp; transactions]</em></td></tr>
+    <tr><td><em>[Member 2]</em></td><td><em>[e.g., Frontend / Angular]</em></td></tr>
+    <tr><td><em>[Member 3]</em></td><td><em>[e.g., Documentation / QA / admin features]</em></td></tr>
+  </tbody>
+</table>
+<p><em>Replace bracketed entries with your actual team roster.</em></p>
+
+<h3>Overview of the system</h3>
+<p>AnimalCare is a web application for posting and browsing <strong>lost</strong>, <strong>found</strong>, <strong>rescue</strong>, and <strong>adoption</strong> listings. Users can register, sign in, create and manage posts, exchange <strong>direct messages</strong>, and—on adoption posts—<strong>request adoption</strong> so that one adopter can reserve a pet while the post owner can <strong>approve or reject</strong> the request. An <strong>administrator</strong> can oversee users, posts, comments, reservations, and a <strong>transaction audit log</strong> for accountability. The system is implemented as a single-page application with <strong>role-based access</strong> and <strong>server-enforced</strong> database rules (Firestore security rules).</p>
+
+<hr />
+
+<h2>2. Problem Statement</h2>
+<h3>What problem does the system solve?</h3>
+<p>Pet-related information is often scattered across social media groups, chat applications, and informal channels. That fragmentation makes listings harder to <strong>discover</strong>, <strong>verify</strong>, and <strong>coordinate</strong>—especially for adoption, where only one family should hold an active reservation at a time. Without a dedicated system, teams face <strong>duplicate reservations</strong>, <strong>lost context</strong>, and <strong>limited traceability</strong> of important state changes.</p>
+
+<h3>Target users</h3>
+<ul>
+  <li><strong>General users</strong> reporting lost or found animals, or promoting rescue and adoption listings.</li>
+  <li><strong>Adopters</strong> seeking a clear, fair reservation process tied to a specific listing.</li>
+  <li><strong>Administrators</strong> responsible for moderation, oversight, and operational visibility.</li>
+</ul>
+
+<hr />
+
+<h2>3. Objectives</h2>
+<h3>General objective</h3>
+<p>To design and implement a web-based information system that centralizes animal-care listings and supports a <strong>consistent adoption reservation workflow</strong> with <strong>auditable</strong> multi-step database operations.</p>
+
+<h3>Specific objectives</h3>
+<ol>
+  <li>Provide <strong>authentication</strong> (register, login, logout) with <strong>unique email</strong> enforcement.</li>
+  <li>Support <strong>create, read, update, and delete</strong> patterns for posts by type (lost, found, rescue, adoption) and for <strong>comments</strong>.</li>
+  <li>Implement <strong>private messaging</strong> between users, including read-state updates.</li>
+  <li>Implement the <strong>adoption reservation</strong> lifecycle: request, cancel, approve, reject—with <strong>concurrency-safe</strong> updates to posts and reservations.</li>
+  <li>Deliver an <strong>admin dashboard</strong> with statistics and management views for posts, comments, users, reservations, and <strong>transaction logs</strong>.</li>
+  <li>Document <strong>database design</strong> (entities, relationships, constraints) and <strong>transactional behavior</strong> (e.g., atomicity, consistency, isolation, durability) as required by the course rubric.</li>
+</ol>
+
+<hr />
+
+<h2>4. System Features</h2>
+<h3>Core functionalities</h3>
+<ul>
+  <li>User <strong>registration</strong> and <strong>login</strong>; <strong>role-based</strong> navigation and route protection.</li>
+  <li><strong>Feed</strong> and <strong>create-post</strong> experiences across listing types.</li>
+  <li><strong>Comments</strong> on posts.</li>
+  <li><strong>Direct messaging</strong> between users.</li>
+  <li><strong>Adoption reservations</strong>: request to adopt, cancel, and owner <strong>approve/reject</strong>, with corresponding post reservation fields.</li>
+  <li><strong>Administration</strong>: dashboard metrics; moderation and listing management; <strong>immutable-style</strong> transaction audit trail in the UI.</li>
+</ul>
+
+<h3>Key modules (code organization)</h3>
+<ul>
+  <li><strong>Authentication and guards</strong> — e.g., <code>AuthService</code>, auth-related route guards.</li>
+  <li><strong>Posts and feed</strong> — features for lost/found, rescue, adoption, feed, and create-post.</li>
+  <li><strong>Messaging</strong> — messages feature and <code>MessageService</code>.</li>
+  <li><strong>Transactions and reservations</strong> — centralized transactional logic (e.g., <code>TransactionService</code>) using Firestore <code>runTransaction</code> and <code>writeBatch</code> where appropriate.</li>
+  <li><strong>Admin</strong> — consolidated admin UI (statistics, tabs for entities and transaction log).</li>
+  <li><strong>Shared components</strong> — e.g., post cards that surface reservation actions.</li>
+</ul>
+
+<hr />
+
+<h2>5. System Design</h2>
+<h3>UML and diagrams</h3>
+<ul>
+  <li><strong>Use case diagram (recommended):</strong> Actors such as Guest, Registered User, Post Owner, Adopter, and Admin. Use cases include Register, Login, Create/Edit/Delete Post, Comment, Send Message, Request/Cancel Adoption, Approve/Reject Reservation, Browse Feed, Admin moderation, and View transaction audit.</li>
+  <li><strong>ERD:</strong> Relational-style model over Firestore collections, including <strong>users</strong>, <strong>user_emails</strong> (unique email sentinel), <strong>posts</strong>, <strong>comments</strong>, <strong>reservations</strong>, <strong>messages</strong>, and <strong>transactions</strong> (audit), with primary and foreign keys as documented in the project (<code>ACID.md</code>, §2).</li>
+  <li><strong>Optional sequence diagram:</strong> “Request adoption” showing read → validate → transactional writes to reservation and post → audit log.</li>
+</ul>
+
+<h3>Architecture</h3>
+<ul>
+  <li><strong>Client:</strong> Single-page application built with <strong>Angular</strong> (TypeScript).</li>
+  <li><strong>Platform:</strong> <strong>Firebase Authentication</strong> and <strong>Cloud Firestore</strong>.</li>
+  <li><strong>Security model:</strong> <strong>Firestore security rules</strong> enforcing required fields, enumerations, immutability of identity fields where applicable, and append-only rules for audit documents.</li>
+  <li><strong>Integrity patterns:</strong> Firestore <strong>transactions</strong> for multi-document updates that must succeed or fail together (e.g., reservation creation, registration with email uniqueness), and <strong>atomic batches</strong> for operations such as cascading deletes and related audit rows.</li>
+</ul>
+
+<hr />
+
+<h2>6. Live Demonstration (suggested script)</h2>
+<ol>
+  <li><strong>Login</strong> as a regular user; demonstrate <strong>navigation</strong> (feed, create post, messages).</li>
+  <li><strong>Create</strong> a listing (e.g., adoption) and show it in the <strong>feed</strong> or detail view.</li>
+  <li>Using a <strong>second account</strong> or browser profile, <strong>request adoption</strong> and show reservation-related UI.</li>
+  <li>As the <strong>post owner</strong>, <strong>approve</strong> or <strong>reject</strong> the reservation and show updated status.</li>
+  <li>As <strong>admin</strong>, open the <strong>dashboard</strong>, review <strong>reservations</strong>, and open the <strong>Transactions</strong> tab to show <strong>COMMITTED</strong> versus <strong>ROLLED_BACK</strong> outcomes (and retries if two users race).</li>
+  <li><strong>Optional advanced demo:</strong> Attempt simultaneous reservations on the same adoption post; show that only one commits and the other fails with a clear message and audit entry.</li>
+  <li><strong>Delete</strong> a post that has comments and/or reservations; show that related data is removed in a coordinated way (atomic batch).</li>
+</ol>
+<p><em>Prepare dedicated <strong>demo accounts</strong> before the presentation. Do not embed real passwords in handouts or slides.</em></p>
+
+<hr />
+
+<h2>7. Tools &amp; Technologies Used</h2>
+<table>
+  <thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+  <tbody>
+    <tr><td>Language</td><td>TypeScript</td></tr>
+    <tr><td>Frontend</td><td>Angular (~21), Angular Router, Angular SSR-related packages as configured</td></tr>
+    <tr><td>Reactive streams</td><td>RxJS</td></tr>
+    <tr><td>Backend services</td><td>Firebase (Authentication, Firestore)</td></tr>
+    <tr><td>Configuration</td><td>Firebase project, <code>firestore.rules</code>, <code>firestore.indexes.json</code></td></tr>
+    <tr><td>Tooling</td><td>Angular CLI, npm, Prettier, Vitest (as in project configuration)</td></tr>
+  </tbody>
+</table>
+<p><em>Exact versions should match <code>animal-care-angular/package.json</code> at submission time.</em></p>
+
+<hr />
+
+<h2>8. Challenges Encountered</h2>
+<p><em>Customize this section with your team’s real experience. Examples that often apply to this stack:</em></p>
+<ul>
+  <li><strong>Concurrent adoption requests:</strong> Required <strong>Firestore transactions</strong> and <strong>optimistic concurrency</strong> (e.g., monotonic <code>version</code> on posts) instead of naive read-then-write patterns.</li>
+  <li><strong>Email uniqueness on a document database:</strong> Addressed with a <strong>sentinel collection</strong> (<code>user_emails</code>) and a <strong>transactional</strong> claim of the email document id.</li>
+  <li><strong>Cascading consistency:</strong> Deleting a post together with comments, reservations, and audit metadata using <strong><code>writeBatch</code></strong> so the database does not end in a partial state.</li>
+  <li><strong>Security rules:</strong> Iterating on <strong>Firestore rules</strong> for enums, required fields, and <strong>immutable audit</strong> documents until behavior matched requirements.</li>
+  <li><strong>Team workflow:</strong> Coordinating schema, service boundaries, and reviews via <strong>git</strong> and shared documentation.</li>
+</ul>
+
+<hr />
+
+<h2>9. Conclusion &amp; Recommendations</h2>
+<h3>Conclusion</h3>
+<p>AnimalCare delivers a <strong>structured</strong>, <strong>role-aware</strong> platform for pet listings and adoption coordination. The combination of <strong>client services</strong>, <strong>Firestore transactions and batches</strong>, and <strong>security rules</strong>, together with an <strong>audit-oriented transaction log</strong>, supports <strong>data integrity</strong> and <strong>traceability</strong> appropriate for an information-management systems project.</p>
+
+<h3>Recommendations</h3>
+<ul>
+  <li>Add <strong>notifications</strong> (email or push) for reservation status changes.</li>
+  <li>Integrate <strong>Firebase Storage</strong> for photo attachments on listings.</li>
+  <li>Provide <strong>admin export</strong> (CSV/PDF) for reports.</li>
+  <li>Expand <strong>automated end-to-end tests</strong> for critical user journeys.</li>
+  <li>Strengthen <strong>privacy</strong> messaging and policies for contact information displayed on listings.</li>
+</ul>
+
+<div class="appendix">
+<h2>Appendix — Suggested PowerPoint slide list</h2>
+<ol>
+  <li>Title — AnimalCare; course; group; date</li>
+  <li>Agenda — align with instructor sections</li>
+  <li>Team — names and roles</li>
+  <li>System overview — one paragraph + screenshot</li>
+  <li>Problem statement</li>
+  <li>Target users</li>
+  <li>General and specific objectives</li>
+  <li>Features — bullet overview</li>
+  <li>Key modules — diagram or folder map</li>
+  <li>Use case diagram</li>
+  <li>ERD</li>
+  <li>Architecture — Angular + Firebase + rules</li>
+  <li>Integrity — transactions, batches, audit (brief)</li>
+  <li>Live demo — numbered steps</li>
+  <li>Tech stack table</li>
+  <li>Challenges and solutions</li>
+  <li>Conclusion</li>
+  <li>Recommendations — Q&amp;A</li>
+</ol>
+<p><em>Generated for the AnimalCare project repository. ERD and ACID details: see <code>ACID.md</code> in the project root.</em></p>
+</div>
+
+</body>
+</html>

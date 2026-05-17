@@ -4,7 +4,7 @@ import { Router, ActivatedRoute, RouterLink } from '@angular/router';
 import { PostService } from '../../core/services/post.service';
 import { AuthService } from '../../core/services/auth.service';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
-import { PostType, UrgencyLevel, EventCategory } from '../../core/models/post.model';
+import { PostType, UrgencyLevel, EventCategory, MAX_POST_IMAGES } from '../../core/models/post.model';
 
 @Component({
   selector: 'app-create-post',
@@ -40,21 +40,27 @@ import { PostType, UrgencyLevel, EventCategory } from '../../core/models/post.mo
           </div>
 
           <div class="form-group">
-            <label for="imageFile">Pet Photo</label>
-            <div class="file-upload" (click)="fileInput.click()">
-              @if (imageUrl) {
-                <div class="image-preview">
-                  <img [src]="imageUrl" alt="Preview" />
-                  <button type="button" class="remove-image" (click)="removeImage($event)">&times;</button>
-                </div>
-              } @else {
+            <label for="imageFile">Photos (up to {{ maxPostImages }})</label>
+            @if (imageUrls.length > 0) {
+              <div class="image-previews">
+                @for (url of imageUrls; track $index) {
+                  <div class="image-preview-thumb">
+                    <img [src]="url" alt="Preview {{ $index + 1 }}" />
+                    <button type="button" class="remove-image" (click)="removeImage($index, $event)" aria-label="Remove photo">&times;</button>
+                  </div>
+                }
+              </div>
+            }
+            @if (imageUrls.length < maxPostImages) {
+              <div class="file-upload" (click)="fileInput.click()">
                 <div class="upload-placeholder">
                   <span class="upload-icon">+</span>
-                  <span>Click to upload a photo</span>
+                  <span>{{ imageUrls.length === 0 ? 'Click to upload photos' : 'Add more photos' }}</span>
                 </div>
-              }
-            </div>
-            <input #fileInput type="file" id="imageFile" accept="image/*" class="file-input" (change)="onFileSelected($event)" />
+              </div>
+            }
+            <input #fileInput type="file" id="imageFile" accept="image/*" multiple class="file-input" (change)="onFilesSelected($event)" />
+            <p class="upload-hint">Each image must be under 5MB. You can select multiple files at once.</p>
           </div>
 
           <div class="form-group">
@@ -258,16 +264,31 @@ import { PostType, UrgencyLevel, EventCategory } from '../../core/models/post.mo
       color: var(--primary);
     }
 
-    .image-preview {
-      position: relative;
-      max-height: 250px;
+    .image-previews {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
     }
 
-    .image-preview img {
+    .image-preview-thumb {
+      position: relative;
+      aspect-ratio: 1;
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .image-preview-thumb img {
       width: 100%;
-      max-height: 250px;
+      height: 100%;
       object-fit: cover;
       display: block;
+    }
+
+    .upload-hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.375rem;
     }
 
     .remove-image {
@@ -375,8 +396,8 @@ export class CreatePostComponent {
     return descs[this.selectedType];
   });
 
-  imageUrl = '';
-  private selectedFile: File | null = null;
+  readonly maxPostImages = MAX_POST_IMAGES;
+  imageUrls: string[] = [];
   description = '';
   location = '';
   date = new Date().toISOString().split('T')[0];
@@ -396,27 +417,42 @@ export class CreatePostComponent {
   success = signal('');
   loading = signal(false);
 
-  onFileSelected(event: Event): void {
+  onFilesSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
-    if (input.files && input.files[0]) {
-      const file = input.files[0];
-      if (file.size > 5 * 1024 * 1024) {
-        this.error.set('Image must be less than 5MB');
-        return;
+    if (!input.files?.length) return;
+
+    const remaining = this.maxPostImages - this.imageUrls.length;
+    if (remaining <= 0) {
+      this.error.set(`You can attach up to ${this.maxPostImages} images per post`);
+      input.value = '';
+      return;
+    }
+
+    const files = Array.from(input.files).slice(0, remaining);
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) {
+        this.error.set('Only image files are allowed');
+        continue;
       }
-      this.selectedFile = file;
+      if (file.size > 5 * 1024 * 1024) {
+        this.error.set('Each image must be less than 5MB');
+        continue;
+      }
       const reader = new FileReader();
       reader.onload = (e) => {
-        this.imageUrl = e.target?.result as string || '';
+        const dataUrl = e.target?.result as string;
+        if (dataUrl && this.imageUrls.length < this.maxPostImages) {
+          this.imageUrls = [...this.imageUrls, dataUrl];
+        }
       };
       reader.readAsDataURL(file);
     }
+    input.value = '';
   }
 
-  removeImage(event: Event): void {
+  removeImage(index: number, event: Event): void {
     event.stopPropagation();
-    this.imageUrl = '';
-    this.selectedFile = null;
+    this.imageUrls = this.imageUrls.filter((_, i) => i !== index);
   }
 
   onSubmit(): void {
@@ -426,7 +462,7 @@ export class CreatePostComponent {
 
     const result = this.postService.createPost({
       type: this.selectedType,
-      imageUrl: this.imageUrl || undefined,
+      imageUrls: this.imageUrls.length ? this.imageUrls : undefined,
       description: this.description,
       location: this.location,
       date: this.date,

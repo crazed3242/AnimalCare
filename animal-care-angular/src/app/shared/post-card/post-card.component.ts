@@ -1,7 +1,7 @@
 import { Component, Input, Output, EventEmitter, inject, signal, computed } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Post } from '../../core/models/post.model';
+import { Post, getPostImageUrls } from '../../core/models/post.model';
 import { Reservation } from '../../core/models/reservation.model';
 import { AuthService } from '../../core/services/auth.service';
 import { CommentService } from '../../core/services/comment.service';
@@ -33,7 +33,7 @@ import { DatePipe } from '@angular/common';
             <span class="badge badge-resolved">Resolved</span>
           }
           @if (post.type === 'adoption' && post.reservationStatus === 'reserved') {
-            <span class="badge badge-reserved" title="Pending adoption reservation">Reserved</span>
+            <span class="badge badge-reserved" title="An adoption request is under review">Request pending</span>
           }
           @if (post.type === 'adoption' && post.reservationStatus === 'adopted') {
             <span class="badge badge-adopted" title="Adoption complete">Adopted</span>
@@ -53,10 +53,17 @@ import { DatePipe } from '@angular/common';
         </div>
       </div>
 
-      @if (post.imageUrl) {
-        <button class="post-image" type="button" (click)="openImagePreview()">
-          <img [src]="post.imageUrl" [alt]="post.description" />
-        </button>
+      @if (postImages().length > 0) {
+        <div class="post-images" [class.post-images-multi]="postImages().length > 1">
+          @for (url of postImages(); track url; let i = $index) {
+            <button class="post-image" type="button" (click)="openImagePreview(i)" [attr.aria-label]="'View image ' + (i + 1) + ' of ' + postImages().length">
+              <img [src]="url" [alt]="post.description + ' - photo ' + (i + 1)" />
+            </button>
+          }
+          @if (postImages().length > 1) {
+            <span class="post-image-count">{{ postImages().length }} photos</span>
+          }
+        </div>
       }
 
       <div class="post-content">
@@ -133,17 +140,17 @@ import { DatePipe } from '@angular/common';
           </button>
         }
         @if (authService.currentUser()?.id !== post.userId) {
-          <button class="btn btn-ghost btn-sm" (click)="message.emit(post)">
+          <button class="btn btn-ghost btn-sm" (click)="message.emit(post)" title="Send a private message to the listing owner">
             Message
           </button>
           @if (canRequestAdoption()) {
-            <button class="btn btn-primary btn-sm" (click)="toggleReserveForm()">
-              {{ showReserveForm() ? 'Close' : 'Request to Adopt' }}
+            <button class="btn btn-primary btn-sm" (click)="toggleReserveForm()" title="Submit a formal adoption request for the owner to review">
+              {{ showReserveForm() ? 'Close' : 'Submit adoption request' }}
             </button>
           }
           @if (myPendingReservation()) {
             <button class="btn btn-outline btn-sm" (click)="cancelMyReservation()" [disabled]="txBusy()">
-              Cancel Reservation
+              Cancel request
             </button>
           }
         }
@@ -171,6 +178,12 @@ import { DatePipe } from '@angular/common';
 
       @if (post.type === 'adoption') {
         <div class="reservation-panel">
+          @if (!isOwner() && authService.currentUser()) {
+            <p class="adoption-help">
+              <strong>Message</strong> is for informal questions.
+              <strong>Submit adoption request</strong> notifies the owner and holds the listing while they review your application.
+            </p>
+          }
           @if (showReserveForm() && canRequestAdoption()) {
             <div class="reserve-form">
               <label class="reserve-label">Tell {{ post.userName }} why you'd be a great adopter:</label>
@@ -182,7 +195,7 @@ import { DatePipe } from '@angular/common';
               ></textarea>
               <div class="reserve-actions">
                 <button class="btn btn-primary btn-sm" (click)="submitReservation()" [disabled]="txBusy() || !reserveMessage.trim()">
-                  {{ txBusy() ? 'Submitting...' : 'Submit reservation (atomic)' }}
+                  {{ txBusy() ? 'Submitting...' : 'Submit adoption request' }}
                 </button>
                 @if (txError()) {
                   <span class="reserve-error">{{ txError() }}</span>
@@ -191,6 +204,11 @@ import { DatePipe } from '@angular/common';
             </div>
           }
 
+          @if (isOwner()) {
+            <p class="adoption-help owner-adoption-help">
+              Review formal requests below. Use <strong>Message</strong> only for informal follow-up.
+            </p>
+          }
           @if (isOwner() && pendingReservations().length > 0) {
             <div class="owner-decisions">
               <h4 class="reserve-heading">Pending adoption requests</h4>
@@ -269,7 +287,14 @@ import { DatePipe } from '@angular/common';
             <button class="image-preview-close" type="button" (click)="closeImagePreview()" aria-label="Close image preview">
               ✕
             </button>
-            <img [src]="post.imageUrl" [alt]="post.description" />
+            @if (postImages().length > 1) {
+              <button class="image-preview-nav image-preview-prev" type="button" (click)="prevPreviewImage($event)" aria-label="Previous image">‹</button>
+            }
+            <img [src]="previewImageUrl()" [alt]="post.description" />
+            @if (postImages().length > 1) {
+              <button class="image-preview-nav image-preview-next" type="button" (click)="nextPreviewImage($event)" aria-label="Next image">›</button>
+              <span class="image-preview-counter">{{ previewImageIndex() + 1 }} / {{ postImages().length }}</span>
+            }
           </div>
         </div>
       }
@@ -331,11 +356,28 @@ import { DatePipe } from '@angular/common';
       justify-content: flex-end;
     }
 
+    .post-images {
+      position: relative;
+      margin: 0.75rem 0;
+    }
+
+    .post-images-multi {
+      display: flex;
+      gap: 0.25rem;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      padding: 0 1.25rem;
+    }
+
+    .post-images-multi .post-image {
+      flex: 0 0 min(85%, 320px);
+      scroll-snap-align: start;
+    }
+
     .post-image {
       width: 100%;
       max-height: 400px;
       overflow: hidden;
-      margin: 0.75rem 0;
       border: none;
       padding: 0;
       background: transparent;
@@ -345,8 +387,22 @@ import { DatePipe } from '@angular/common';
     .post-image img {
       width: 100%;
       height: 100%;
+      max-height: 400px;
       object-fit: cover;
       display: block;
+    }
+
+    .post-image-count {
+      position: absolute;
+      bottom: 0.75rem;
+      right: 1.5rem;
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.25rem 0.5rem;
+      border-radius: var(--radius);
+      pointer-events: none;
     }
 
     .image-preview-backdrop {
@@ -390,6 +446,43 @@ import { DatePipe } from '@angular/common';
       font-size: 1rem;
       line-height: 1;
       cursor: pointer;
+      z-index: 2;
+    }
+
+    .image-preview-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 2.5rem;
+      height: 2.5rem;
+      border: none;
+      border-radius: var(--radius-full);
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 1.5rem;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .image-preview-prev {
+      left: 0.5rem;
+    }
+
+    .image-preview-next {
+      right: 0.5rem;
+    }
+
+    .image-preview-counter {
+      position: absolute;
+      bottom: 0.5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 0.8125rem;
+      padding: 0.25rem 0.625rem;
+      border-radius: var(--radius-full);
     }
 
     .post-content {
@@ -580,6 +673,16 @@ import { DatePipe } from '@angular/common';
       gap: 0.75rem;
     }
 
+    .adoption-help {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+      margin: 0;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-soft, #f9fafb);
+      border-radius: var(--radius);
+    }
+
     .reserve-label {
       display: block;
       font-size: 0.8125rem;
@@ -694,19 +797,38 @@ export class PostCardComponent {
     return value.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
 
+  postImages(): string[] {
+    return getPostImageUrls(this.post);
+  }
+
+  previewImageUrl(): string {
+    return this.postImages()[this.previewImageIndex()] ?? '';
+  }
+
   authService = inject(AuthService);
   commentService = inject(CommentService);
   transactionService = inject(TransactionService);
 
   showComments = signal(false);
   showImagePreview = signal(false);
+  previewImageIndex = signal(0);
   showReserveForm = signal(false);
   txBusy = signal(false);
   txError = signal<string | null>(null);
   reserveMessage = '';
   newComment = '';
-  comments = signal<any[]>([]);
-  commentCount = signal(0);
+
+  comments = computed(() => {
+    const postId = this.post?.id;
+    if (!postId) return [];
+    return this.commentService.getCommentsByPost(postId);
+  });
+
+  commentCount = computed(() => {
+    const postId = this.post?.id;
+    if (!postId) return 0;
+    return this.commentService.getCommentCount(postId);
+  });
 
   isOwner = computed(() => this.authService.currentUser()?.id === this.post?.userId);
 
@@ -747,32 +869,38 @@ export class PostCardComponent {
     return true;
   });
 
-  ngOnChanges(): void {
-    this.commentCount.set(this.commentService.getCommentCount(this.post.id));
-  }
-
   toggleComments(): void {
     this.showComments.update(v => !v);
-    if (this.showComments()) {
-      this.comments.set(this.commentService.getCommentsByPost(this.post.id));
-      this.commentCount.set(this.comments().length);
-    }
   }
 
   submitComment(): void {
-    if (!this.newComment.trim()) return;
-    this.addComment.emit({ postId: this.post.id, content: this.newComment });
+    const content = this.newComment.trim();
+    if (!content) return;
     this.newComment = '';
-    this.comments.set(this.commentService.getCommentsByPost(this.post.id));
-    this.commentCount.set(this.comments().length);
+    this.addComment.emit({ postId: this.post.id, content });
   }
 
-  openImagePreview(): void {
+  openImagePreview(index = 0): void {
+    this.previewImageIndex.set(index);
     this.showImagePreview.set(true);
   }
 
   closeImagePreview(): void {
     this.showImagePreview.set(false);
+  }
+
+  prevPreviewImage(event: Event): void {
+    event.stopPropagation();
+    const total = this.postImages().length;
+    if (total <= 1) return;
+    this.previewImageIndex.update(i => (i - 1 + total) % total);
+  }
+
+  nextPreviewImage(event: Event): void {
+    event.stopPropagation();
+    const total = this.postImages().length;
+    if (total <= 1) return;
+    this.previewImageIndex.update(i => (i + 1) % total);
   }
 
   toggleReserveForm(): void {

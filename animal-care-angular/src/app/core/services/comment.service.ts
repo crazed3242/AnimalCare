@@ -59,8 +59,11 @@ export class CommentService {
       createdAt: new Date().toISOString()
     };
 
+    this.commentsSignal.update(list => [...list, comment]);
+
     setDoc(doc(db, COMMENTS_COLLECTION, comment.id), comment).catch(err => {
       console.error('[CommentService] addComment failed', err);
+      this.commentsSignal.update(list => list.filter(c => c.id !== comment.id));
     });
 
     return { success: true, comment };
@@ -80,8 +83,11 @@ export class CommentService {
     const db = getDb();
     if (!db) return { success: false, error: 'Offline' };
 
+    this.commentsSignal.update(list => list.filter(c => c.id !== commentId));
+
     deleteDoc(doc(db, COMMENTS_COLLECTION, commentId)).catch(err => {
       console.error('[CommentService] deleteComment failed', err);
+      this.commentsSignal.update(list => [...list, comment]);
     });
 
     return { success: true };

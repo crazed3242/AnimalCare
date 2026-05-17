@@ -8,6 +8,8 @@ import { MessageService } from '../../core/services/message.service';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
 import { PostCardComponent } from '../../shared/post-card/post-card.component';
 import { Post } from '../../core/models/post.model';
+import { navigateToMessageFromPost } from '../../core/utils/message-navigation';
+import { isPostVisibleToViewer } from '../../core/utils/post-visibility';
 import { DatePipe } from '@angular/common';
 
 @Component({
@@ -222,8 +224,11 @@ export class ProfileComponent implements OnInit {
   userPosts = computed(() => {
     const p = this.profile();
     if (!p) return [];
+    const me = this.authService.currentUser();
+    const viewer = { viewerId: me?.id, isAdmin: this.authService.isAdmin() };
     return this.postService.posts()
       .filter(post => post.userId === p.id)
+      .filter(post => isPostVisibleToViewer(post, viewer))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   });
 
@@ -269,7 +274,7 @@ export class ProfileComponent implements OnInit {
   }
 
   onMessage(post: Post): void {
-    this.router.navigate(['/messages', post.userId]);
+    navigateToMessageFromPost(this.router, post);
   }
 
   onDeleteComment(commentId: string): void {
